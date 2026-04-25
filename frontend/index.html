@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Green Tech Transition Game</title>
+<style>
+:root {
+  --g: #1b7a34; --gl: #4caf50; --gbg: #e8f5e9;
+  --bg: #f4f7f4; --card: #fff; --text: #111;
+  --muted: #666; --border: #dde6dd;
+  --red: #c0392b; --redbg: #fdecea;
+  --orange: #d35400; --orangebg: #fff3e0;
+  --blue: #1565c0; --bluebg: #e3f2fd;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+header{background:var(--g);color:#fff;padding:.9rem 1.5rem;display:flex;align-items:center;gap:.75rem;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px #0004}
+header h1{font-size:1.2rem;font-weight:700}
+#hdr-right{margin-left:auto;font-size:.85rem;opacity:.85}
+.wrap{max-width:860px;margin:1.8rem auto;padding:0 1rem}
+.card{background:var(--card);border-radius:14px;padding:2rem;box-shadow:0 2px 14px #0001;margin-bottom:1.4rem}
+h2{color:var(--g);margin-bottom:1.4rem;font-size:1.35rem}
+h3{color:var(--g);margin-bottom:.9rem;font-size:1.05rem}
+.fg{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media(max-width:540px){.fg{grid-template-columns:1fr}.card{padding:1.1rem}}
+label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:.35rem}
+input[type=text],input[type=number]{width:100%;padding:.7rem .9rem;border:2px solid var(--border);border-radius:8px;font-size:1rem;transition:border-color .2s;background:#fafffe}
+input:focus{outline:none;border-color:var(--gl)}
+.btn{padding:.7rem 1.4rem;border:none;border-radius:9px;cursor:pointer;font-size:.95rem;font-weight:700;transition:transform .1s,opacity .2s;display:inline-block}
+.btn:hover{opacity:.88;transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn-p{background:var(--gl);color:#fff}
+.btn-s{background:var(--g);color:#fff}
+.btn-o{background:transparent;color:var(--g);border:2px solid var(--g)}
+.btn-r{background:var(--red);color:#fff}
+.btn-w{width:100%;display:block;margin-bottom:.6rem;padding:.9rem}
+.row{display:flex;gap:.8rem;margin-top:1rem;align-items:center}
+.row .btn{flex:1}
+
+/* Room code */
+.room-code{font-size:2.8rem;font-weight:900;color:var(--g);letter-spacing:.22em;text-align:center;padding:1.2rem;background:var(--gbg);border-radius:12px;margin:1rem 0;cursor:pointer;user-select:all}
+.room-code:hover::after{content:' (click to copy)';font-size:.9rem;letter-spacing:0;opacity:.6}
+
+/* Alerts */
+.alert{padding:.85rem 1rem;border-radius:9px;margin-bottom:1rem;font-size:.9rem;line-height:1.5}
+.a-info{background:var(--bluebg);color:var(--blue)}
+.a-ok{background:var(--gbg);color:var(--g)}
+.a-warn{background:var(--orangebg);color:var(--orange)}
+.a-err{background:var(--redbg);color:var(--red)}
+
+/* Player list */
+.plist{list-style:none}
+.pi{display:flex;align-items:center;gap:.6rem;padding:.65rem .9rem;border-radius:9px;background:var(--bg);margin-bottom:.45rem}
+.pi-name{font-weight:600;flex:1}
+.pi-share{font-size:.82rem;color:var(--muted)}
+.sbar{height:6px;background:var(--border);border-radius:3px;width:70px;overflow:hidden;flex-shrink:0}
+.sbar-f{height:100%;background:var(--gl);border-radius:3px;transition:width .5s}
+
+/* Badges */
+.badge{padding:.2rem .6rem;border-radius:999px;font-size:.75rem;font-weight:700}
+.b-g{background:var(--gbg);color:var(--g)}
+.b-r{background:var(--redbg);color:var(--red)}
+.b-o{background:var(--orangebg);color:var(--orange)}
+.b-gray{background:#f0f0f0;color:var(--muted)}
+.b-me{background:#e8eaf6;color:#3949ab}
+
+/* Round dots */
+.rdots{display:flex;justify-content:center;gap:.45rem;margin-bottom:1rem}
+.rdot{width:11px;height:11px;border-radius:50%;background:var(--border);transition:all .3s}
+.rdot.done{background:var(--gl)}
+.rdot.cur{background:var(--g);transform:scale(1.35)}
+
+/* Stats grid */
+.sgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.9rem;margin-bottom:1.2rem}
+.sc{background:var(--bg);border-radius:9px;padding:.85rem;text-align:center}
+.sv{font-size:1.4rem;font-weight:700;color:var(--g)}
+.sl{font-size:.75rem;color:var(--muted);margin-top:.2rem}
+
+/* Investment slider */
+.inv-ctrl{display:flex;align-items:center;gap:.9rem;margin:.8rem 0}
+input[type=range]{flex:1;accent-color:var(--gl);height:6px}
+.inv-val{font-size:1.6rem;font-weight:800;color:var(--g);min-width:5rem;text-align:right}
+.thresh-info{font-size:.87rem;color:var(--muted);margin:.3rem 0 1rem}
+
+/* Table */
+.tscroll{overflow-x:auto;margin-bottom:1.2rem}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th{background:var(--g);color:#fff;padding:.65rem .85rem;text-align:left;font-weight:600;white-space:nowrap}
+td{padding:.65rem .85rem;border-bottom:1px solid var(--border);white-space:nowrap}
+tr:nth-child(even) td{background:var(--bg)}
+tr.me td{background:#e8f5e9;font-weight:600}
+
+/* Leaderboard podium */
+.podium{display:flex;justify-content:center;gap:.6rem;margin-bottom:1.5rem;flex-wrap:wrap}
+.pod{background:var(--gbg);border-radius:12px;padding:1rem 1.5rem;text-align:center;min-width:130px}
+.pod-rank{font-size:1.6rem}
+.pod-name{font-weight:700;font-size:.95rem;margin:.3rem 0}
+.pod-score{color:var(--g);font-weight:700}
+
+/* Toast */
+.toast{position:fixed;bottom:1.5rem;right:1.5rem;background:var(--g);color:#fff;padding:.85rem 1.3rem;border-radius:10px;font-weight:600;box-shadow:0 4px 20px #0003;transform:translateY(120px);transition:transform .3s;z-index:999;max-width:320px}
+.toast.show{transform:translateY(0)}
+
+/* Hidden */
+.h{display:none!important}
+
+/* Waiting spinner */
+.spin{display:inline-block;width:1.2rem;height:1.2rem;border:3px solid var(--border);border-top-color:var(--gl);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.4rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:1.4rem">🌱</span>
+  <h1>Green Tech Transition Game</h1>
+  <span id="hdr-right"></span>
+</header>
+
+<div class="wrap">
+
+<!-- ── LANDING ─────────────────────────────────────────────────────────── -->
+<div id="s-landing" class="card">
+  <h2>Welcome</h2>
+  <p style="color:var(--muted);margin-bottom:1.6rem">An N-player market game about green technology investment decisions.</p>
+  <button class="btn btn-s btn-w" onclick="go('admin-setup')">🔧 Create Game &nbsp;(Admin)</button>
+  <button class="btn btn-p btn-w" onclick="go('player-join')">👤 Join Game &nbsp;(Player)</button>
+  <button class="btn btn-o btn-w" onclick="goRejoin()">🔄 Rejoin Previous Session</button>
+</div>
+
+<!-- ── ADMIN SETUP ─────────────────────────────────────────────────────── -->
+<div id="s-admin-setup" class="card h">
+  <h2>New Game — Parameters</h2>
+  <div class="alert a-info" style="margin-bottom:1.4rem">
+    Players who invest below their green threshold <strong>g·s<sub>i</sub></strong> lose that share.
+    Over-investors share the pool proportionally to their excess investment.
+  </div>
+  <div class="fg">
+    <div>
+      <label>Green demand <em>g<sub>min</sub></em></label>
+      <input type="number" id="p-gmin" value="0.1" min="0.01" max="0.98" step="0.01">
+    </div>
+    <div>
+      <label>Green demand <em>g<sub>max</sub></em></label>
+      <input type="number" id="p-gmax" value="0.9" min="0.02" max="0.99" step="0.01">
+      <p style="font-size:.78rem;color:var(--muted);margin-top:.3rem">Realized g ~ U(g<sub>min</sub>, g<sub>max</sub>). Players see only the range.</p>
+    </div>
+    <div>
+      <label>Number of rounds</label>
+      <input type="number" id="p-rounds" value="6" min="1" max="20" step="1">
+    </div>
+  </div>
+  <h3 style="margin-top:1.4rem">Weight parameters</h3>
+  <div class="fg">
+    <div>
+      <label>α (alpha) — underinvestor weight: 0=market share, 1=effort</label>
+      <input type="number" id="p-alpha" value="0" min="0" max="1" step="0.1">
+    </div>
+    <div>
+      <label>β (beta) — overinvestor weight: 0=market share, 1=effort</label>
+      <input type="number" id="p-beta" value="0" min="0" max="1" step="0.1">
+    </div>
+  </div>
+  <h3 style="margin-top:1.4rem">Reward parameters</h3>
+  <div class="fg">
+    <div>
+      <label>π<sub>p</sub> — reward per green customer served</label>
+      <input type="number" id="p-pip" value="4" min="0" step="0.5">
+    </div>
+    <div>
+      <label>π<sub>r</sub> — reward per residual green customer (2nd stage)</label>
+      <input type="number" id="p-pir" value="3" min="0" step="0.5">
+    </div>
+    <div>
+      <label>π<sub>q</sub> — reward per stolen green customer</label>
+      <input type="number" id="p-piq" value="5" min="0" step="0.5">
+    </div>
+    <div>
+      <label>c<sub>u</sub> — penalty per customer lost (underinvestors)</label>
+      <input type="number" id="p-cu" value="10" min="0" step="0.5">
+    </div>
+    <div>
+      <label>c<sub>o</sub> — penalty per failed stealing attempt (overinvestors)</label>
+      <input type="number" id="p-co" value="1" min="0" step="0.5">
+    </div>
+  </div>
+  <div class="row">
+    <button class="btn btn-o" onclick="go('landing')">← Back</button>
+    <button class="btn btn-s" onclick="createRoom()">Create Room →</button>
+  </div>
+</div>
+
+<!-- ── ADMIN LOBBY ─────────────────────────────────────────────────────── -->
+<div id="s-admin-lobby" class="card h">
+  <h2>Lobby — Waiting for Players</h2>
+  <p style="color:var(--muted);margin-bottom:.5rem">Share this code with players:</p>
+  <div class="room-code" id="admin-code" onclick="copyCode()">------</div>
+  <div class="alert a-info" id="admin-token-msg"></div>
+  <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.8rem">
+    <h3 style="margin:0">Players</h3>
+    <span class="badge b-gray" id="pcount-badge">0 joined</span>
+  </div>
+  <ul class="plist" id="admin-plist"></ul>
+  <div class="row" style="margin-top:1rem">
+    <button class="btn btn-o" onclick="abandonRoom()">← Cancel</button>
+    <button class="btn btn-s" style="flex:2" id="start-btn" onclick="startGame()" disabled>Start Game</button>
+  </div>
+</div>
+
+<!-- ── PLAYER JOIN ─────────────────────────────────────────────────────── -->
+<div id="s-player-join" class="card h">
+  <h2>Join a Game</h2>
+  <div style="margin-bottom:1.1rem">
+    <label>Room Code</label>
+    <input type="text" id="join-code" placeholder="e.g. AB1234" style="text-transform:uppercase;letter-spacing:.18em;font-size:1.2rem;text-align:center">
+  </div>
+  <div style="margin-bottom:1.1rem">
+    <label>Your Name</label>
+    <input type="text" id="join-name" placeholder="Enter your name">
+  </div>
+  <div class="row">
+    <button class="btn btn-o" onclick="go('landing')">← Back</button>
+    <button class="btn btn-p" onclick="joinRoom()">Join →</button>
+  </div>
+</div>
+
+<!-- ── PLAYER LOBBY ─────────────────────────────────────────────────────── -->
+<div id="s-player-lobby" class="card h">
+  <h2 id="lobby-title">Waiting for game to start…</h2>
+  <div class="room-code" id="player-code-disp">------</div>
+  <div class="alert a-info"><span class="spin"></span>Waiting for the admin to start the game.</div>
+  <ul class="plist" id="player-plist"></ul>
+  <button class="btn btn-o" style="width:100%;margin-top:1rem" onclick="abandonRoom()">← Leave Room</button>
+</div>
+
+<!-- ── ADMIN GAME ──────────────────────────────────────────────────────── -->
+<div id="s-admin-game" class="card h">
+  <div class="rdots" id="admin-rdots"></div>
+  <h2 id="admin-game-title">Round 1 — Submissions</h2>
+  <div class="alert a-ok" id="admin-g-display"></div>
+  <div class="alert a-info" id="admin-sub-info"></div>
+  <ul class="plist" id="admin-game-plist"></ul>
+  <button class="btn btn-s btn-w" id="resolve-btn" onclick="resolveRound()" style="margin-top:1.2rem">Resolve Round →</button>
+</div>
+
+<!-- ── PLAYER GAME ──────────────────────────────────────────────────────── -->
+<div id="s-player-game" class="card h">
+  <div class="rdots" id="player-rdots"></div>
+  <h2 id="player-game-title">Round 1</h2>
+
+  <div class="sgrid" id="my-stats"></div>
+
+  <div id="invest-form">
+    <h3>Your Investment Decision</h3>
+    <p class="thresh-info">Choose <em>a<sub>i</sub></em> ∈ [0, s<sub>i</sub>]. Your share: <strong id="share-disp">0.000</strong> &nbsp;|&nbsp; g ~ U(<span id="gmin-disp">?</span>, <span id="gmax-disp">?</span>)</p>
+    <div class="inv-ctrl">
+      <span style="font-size:.8rem;color:var(--muted)">0</span>
+      <input type="range" id="inv-slider" min="0" max="1" step="0.001" value="0" oninput="onSlider(this.value)">
+      <span style="font-size:.8rem;color:var(--muted)" id="max-lbl">0.000</span>
+    </div>
+    <div class="inv-val" id="inv-val">0.000</div>
+    <p class="thresh-info">
+      Green threshold range: <strong>[<span id="thresh-min">0.000</span>, <span id="thresh-max">0.000</span>]</strong>
+    </p>
+    <button class="btn btn-p btn-w" id="submit-btn" onclick="submitInv()">Submit Investment</button>
+  </div>
+
+  <div id="invest-wait" class="h">
+    <div class="alert a-ok"><span class="spin"></span>Investment submitted! Waiting for admin to resolve…</div>
+  </div>
+
+  <h3 style="margin-top:1.4rem">Players</h3>
+  <ul class="plist" id="player-game-plist"></ul>
+</div>
+
+<!-- ── ROUND RESULTS ──────────────────────────────────────────────────── -->
+<div id="s-round-results" class="card h">
+  <div class="rdots" id="res-rdots"></div>
+  <h2 id="res-title">Round Results</h2>
+  <div class="alert a-info" id="res-meta"></div>
+  <div class="tscroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>s<sub>i</sub></th>
+          <th>a<sub>i</sub></th>
+          <th>g·s<sub>i</sub></th>
+          <th>Position</th>
+          <th>u / w</th>
+          <th>s̃<sub>i</sub></th>
+          <th>π<sub>p</sub>·own</th>
+          <th>π<sub>r</sub>·2nd</th>
+          <th>π<sub>q</sub>·w</th>
+          <th>Penalty</th>
+          <th>Score</th>
+        </tr>
+      </thead>
+      <tbody id="res-tbody"></tbody>
+    </table>
+  </div>
+  <div id="res-admin-btns" class="h">
+    <button class="btn btn-s btn-w" id="next-btn" onclick="nextRound()">Next Round →</button>
+  </div>
+  <div id="res-player-wait" class="h">
+    <div class="alert a-info"><span class="spin"></span>Waiting for admin to start the next round…</div>
+  </div>
+  <div id="res-finish-btn" class="h">
+    <button class="btn btn-p btn-w" onclick="showFinal()">See Final Results →</button>
+  </div>
+</div>
+
+<!-- ── FINAL ──────────────────────────────────────────────────────────── -->
+<div id="s-final" class="card h">
+  <h2>Final Results</h2>
+  <div class="podium" id="podium"></div>
+  <div class="tscroll">
+    <table>
+      <thead><tr><th>Rank</th><th>Player</th><th>Final Share</th><th>Cumulative Score</th></tr></thead>
+      <tbody id="final-tbody"></tbody>
+    </table>
+  </div>
+  <button class="btn btn-o btn-w" style="margin-top:1rem" onclick="restart()">Play Again</button>
+</div>
+
+</div><!-- /wrap -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const S = {
+  role: null, roomId: null, adminToken: null, playerId: null, playerName: null,
+  screen: 'landing', pollId: null,
+  lastStatus: null, lastRound: null, resultsShownRound: null,
+  myShare: 0, g_min: 0.1, g_max: 0.9, g_realized: null, numRounds: 6,
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const f3 = n => (typeof n === 'number') ? n.toFixed(3) : '—';
+const f4 = n => (typeof n === 'number') ? n.toFixed(4) : '—';
+const fr = n => (typeof n === 'number') ? n.toFixed(3) : '—';
+
+function toast(msg, ms=3200) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), ms);
+}
+
+function go(name) {
+  document.querySelectorAll('[id^="s-"]').forEach(e => e.classList.add('h'));
+  $('s-' + name).classList.remove('h');
+  S.screen = name;
+}
+
+function rdots(cur, total, id) {
+  const el = $(id); el.innerHTML = '';
+  for (let i = 1; i <= total; i++) {
+    const d = document.createElement('div');
+    d.className = 'rdot' + (i < cur ? ' done' : i === cur ? ' cur' : '');
+    el.appendChild(d);
+  }
+}
+
+function save() {
+  localStorage.setItem('gtt', JSON.stringify({
+    role: S.role, roomId: S.roomId, adminToken: S.adminToken,
+    playerId: S.playerId, playerName: S.playerName,
+  }));
+}
+
+function load() {
+  try { return JSON.parse(localStorage.getItem('gtt') || 'null'); } catch { return null; }
+}
+
+function restart() {
+  localStorage.removeItem('gtt');
+  clearInterval(S.pollId);
+  Object.assign(S, {
+    role:null, roomId:null, adminToken:null, playerId:null, playerName:null,
+    screen:'landing', pollId:null, lastStatus:null, lastRound:null, resultsShownRound:null,
+    myShare:0, g_min:0.1, g_max:0.9, g_realized:null, numRounds:6,
+  });
+  go('landing');
+}
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method, headers: {'Content-Type':'application/json'},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await res.json();
+  if (!res.ok) throw new Error(d.detail || 'Error');
+  return d;
+}
+
+function copyCode() {
+  navigator.clipboard.writeText(S.roomId).then(() => toast('Room code copied!'));
+}
+
+// ── Create room ────────────────────────────────────────────────────────────
+async function createRoom() {
+  try {
+    const body = {
+      g_min:      parseFloat($('p-gmin').value),
+      g_max:      parseFloat($('p-gmax').value),
+      num_rounds: parseInt($('p-rounds').value),
+      alpha:      parseFloat($('p-alpha').value),
+      beta:       parseFloat($('p-beta').value),
+      pi_p:       parseFloat($('p-pip').value),
+      pi_r:       parseFloat($('p-pir').value),
+      pi_q:       parseFloat($('p-piq').value),
+      c_u:        parseFloat($('p-cu').value),
+      c_o:        parseFloat($('p-co').value),
+    };
+    const d = await api('POST', '/api/rooms', body);
+    S.role = 'admin'; S.roomId = d.room_id; S.adminToken = d.admin_token;
+    S.g = body.g; S.numRounds = body.num_rounds;
+    save();
+    $('admin-code').textContent = d.room_id;
+    $('admin-token-msg').textContent = '🔑 Admin token: ' + d.admin_token + '  (save this in case you need to rejoin)';
+    go('admin-lobby');
+    startPoll();
+  } catch(e) { toast('Error: ' + e.message); }
+}
+
+// ── Join room ──────────────────────────────────────────────────────────────
+async function joinRoom() {
+  try {
+    const code = $('join-code').value.trim().toUpperCase();
+    const name = $('join-name').value.trim();
+    if (!code || !name) { toast('Fill all fields'); return; }
+    const d = await api('POST', `/api/rooms/${code}/join`, { player_name: name });
+    S.role = 'player'; S.roomId = code; S.playerId = d.player_id; S.playerName = d.player_name;
+    save();
+    $('player-code-disp').textContent = code;
+    $('lobby-title').textContent = `Hi ${name}! Waiting for game to start…`;
+    go('player-lobby');
+    startPoll();
+  } catch(e) { toast('Error: ' + e.message); }
+}
+
+// ── Abandon / leave room ───────────────────────────────────────────────────
+function abandonRoom() {
+  const msg = S.role === 'admin'
+    ? 'Cancel this room? All players will be disconnected.'
+    : 'Leave this room?';
+  if (!confirm(msg)) return;
+  clearInterval(S.pollId);
+  restart();
+}
+
+// ── Rejoin ─────────────────────────────────────────────────────────────────
+function goRejoin() {
+  const saved = load();
+  if (!saved || !saved.roomId) { toast('No saved session found'); return; }
+  Object.assign(S, {
+    role: saved.role, roomId: saved.roomId, adminToken: saved.adminToken,
+    playerId: saved.playerId, playerName: saved.playerName,
+  });
+  if (S.role === 'admin') {
+    $('admin-code').textContent = S.roomId;
+    $('admin-token-msg').textContent = '🔑 Admin token: ' + S.adminToken;
+    go('admin-lobby');
+  } else {
+    $('player-code-disp').textContent = S.roomId;
+    $('lobby-title').textContent = `Hi ${S.playerName}! Rejoining…`;
+    go('player-lobby');
+  }
+  startPoll();
+}
+
+// ── Admin actions ──────────────────────────────────────────────────────────
+async function startGame() {
+  try { await api('POST', `/api/rooms/${S.roomId}/start`, { admin_token: S.adminToken }); }
+  catch(e) { toast('Error: ' + e.message); }
+}
+
+async function resolveRound() {
+  try { await api('POST', `/api/rooms/${S.roomId}/resolve`, { admin_token: S.adminToken }); }
+  catch(e) { toast('Error: ' + e.message); }
+}
+
+async function nextRound() {
+  try { await api('POST', `/api/rooms/${S.roomId}/next_round`, { admin_token: S.adminToken }); }
+  catch(e) { toast('Error: ' + e.message); }
+}
+
+// ── Player: investment slider ──────────────────────────────────────────────
+function onSlider(v) {
+  $('inv-val').textContent = f3(parseFloat(v));
+}
+
+async function submitInv() {
+  const v = parseFloat($('inv-slider').value);
+  try {
+    await api('POST', `/api/rooms/${S.roomId}/submit`, { player_id: S.playerId, investment: v });
+    $('invest-form').classList.add('h');
+    $('invest-wait').classList.remove('h');
+    toast('Investment submitted!');
+  } catch(e) { toast('Error: ' + e.message); }
+}
+
+// ── Polling ────────────────────────────────────────────────────────────────
+function startPoll() {
+  if (S.pollId) clearInterval(S.pollId);
+  poll();
+  S.pollId = setInterval(poll, 2000);
+}
+
+async function poll() {
+  if (!S.roomId) return;
+  try {
+    let url = `/api/rooms/${S.roomId}/state`;
+    if (S.role === 'admin' && S.adminToken) url += `?admin_token=${S.adminToken}`;
+    else if (S.playerId) url += `?player_id=${S.playerId}`;
+    const d = await fetch(url).then(r => r.json());
+    if (d.detail) return;
+    handle(d);
+  } catch {}
+}
+
+// ── Main state handler ─────────────────────────────────────────────────────
+function handle(d) {
+  S.g_min = d.g_min; S.g_max = d.g_max;
+  S.g_realized = d.g_realized ?? null;
+  S.numRounds = d.num_rounds;
+  $('hdr-right').textContent =
+    d.status === 'lobby'    ? `Room: ${d.room_id}` :
+    d.status === 'finished' ? `Room: ${d.room_id} | Finished` :
+    `Room: ${d.room_id} | Round ${d.current_round}/${d.num_rounds}`;
+
+  if (S.role === 'admin') handleAdmin(d);
+  else                    handlePlayer(d);
+  S.lastStatus = d.status;
+}
+
+// ── Admin handler ──────────────────────────────────────────────────────────
+function handleAdmin(d) {
+  if (d.status === 'lobby') {
+    if (S.screen !== 'admin-lobby') go('admin-lobby');
+    const names = Object.values(d.players);
+    $('admin-plist').innerHTML = names.map(p =>
+      `<li class="pi"><span class="pi-name">${p.name}</span><span class="badge b-gray">waiting</span></li>`
+    ).join('');
+    $('pcount-badge').textContent = names.length + ' joined';
+    $('start-btn').disabled = names.length < 2;
+    return;
+  }
+
+  if (d.status === 'playing') {
+    if (S.screen !== 'admin-game') go('admin-game');
+    rdots(d.current_round, d.num_rounds, 'admin-rdots');
+    $('admin-game-title').textContent = `Round ${d.current_round} — Waiting for Submissions`;
+    $('admin-g-display').innerHTML = `🎲 Realized g = <strong>${f3(S.g_realized)}</strong> &nbsp;(players see only U(${f3(S.g_min)}, ${f3(S.g_max)}))`;
+
+    const ps = Object.values(d.players);
+    const sub = ps.filter(p => p.submitted).length;
+    $('admin-sub-info').textContent = `${sub} / ${ps.length} players have submitted`;
+    $('admin-game-plist').innerHTML = Object.entries(d.players).map(([pid, p]) =>
+      `<li class="pi">
+        <span class="pi-name">${p.name}</span>
+        <div class="sbar"><div class="sbar-f" style="width:${(p.share*100).toFixed(1)}%"></div></div>
+        <span class="pi-share">${f3(p.share)}</span>
+        <span class="badge ${p.submitted ? 'b-g' : 'b-o'}">${p.submitted ? '✓ Ready' : 'Pending'}</span>
+      </li>`
+    ).join('');
+    return;
+  }
+
+  if (d.status === 'round_results') {
+    const round = d.history.at(-1)?.round;
+    if (S.screen !== 'round-results' || S.resultsShownRound !== round) {
+      S.resultsShownRound = round;
+      go('round-results');
+      renderResults(d, d.history.at(-1));
+    }
+    // Show admin buttons
+    $('res-admin-btns').classList.remove('h');
+    $('res-player-wait').classList.add('h');
+    $('res-finish-btn').classList.add('h');
+    $('next-btn').textContent = `Next Round (${d.current_round + 1}) →`;
+    return;
+  }
+
+  if (d.status === 'finished') {
+    if (S.screen === 'round-results') {
+      // Show finish button instead of next
+      $('res-admin-btns').classList.add('h');
+      $('res-player-wait').classList.add('h');
+      $('res-finish-btn').classList.remove('h');
+    } else if (S.screen !== 'final') {
+      showFinal(d);
+    }
+  }
+}
+
+// ── Player handler ─────────────────────────────────────────────────────────
+function handlePlayer(d) {
+  const me = S.playerId ? d.players[S.playerId] : null;
+
+  if (d.status === 'lobby') {
+    if (S.screen !== 'player-lobby') go('player-lobby');
+    $('player-plist').innerHTML = Object.values(d.players).map(p =>
+      `<li class="pi"><span class="pi-name">${p.name}</span></li>`
+    ).join('');
+    return;
+  }
+
+  if (d.status === 'playing') {
+    if (S.screen !== 'player-game') {
+      go('player-game');
+      // Reset form on new screen
+      $('invest-form').classList.remove('h');
+      $('invest-wait').classList.add('h');
+    }
+    // Detect new round → reset form
+    if (S.lastRound !== d.current_round) {
+      S.lastRound = d.current_round;
+      $('inv-slider').value = 0;
+      $('inv-val').textContent = '0.000';
+      if (!me?.submitted) {
+        $('invest-form').classList.remove('h');
+        $('invest-wait').classList.add('h');
+      }
+    }
+
+    S.myShare = me?.share ?? 0;
+    rdots(d.current_round, d.num_rounds, 'player-rdots');
+    $('player-game-title').textContent = `Round ${d.current_round}`;
+
+    // My stats
+    $('share-disp').textContent = f3(S.myShare);
+    $('max-lbl').textContent = f3(S.myShare);
+    $('gmin-disp').textContent = f3(S.g_min);
+    $('gmax-disp').textContent = f3(S.g_max);
+    $('thresh-min').textContent = f3(S.g_min * S.myShare);
+    $('thresh-max').textContent = f3(S.g_max * S.myShare);
+    const slider = $('inv-slider');
+    slider.max = S.myShare; slider.step = Math.max(0.001, S.myShare / 1000);
+
+    $('my-stats').innerHTML = `
+      <div class="sc"><div class="sv">${f3(S.myShare)}</div><div class="sl">Market Share (s)</div></div>
+      <div class="sc"><div class="sv">${f3(S.g_min * S.myShare)}–${f3(S.g_max * S.myShare)}</div><div class="sl">Threshold range (g·s)</div></div>
+      <div class="sc"><div class="sv">U(${f3(S.g_min)},${f3(S.g_max)})</div><div class="sl">Green demand g</div></div>
+      <div class="sc"><div class="sv">${fr(me?.total_score ?? 0)}</div><div class="sl">Cumulative score</div></div>
+    `;
+
+    // Show submitted state
+    if (me?.submitted) {
+      $('invest-form').classList.add('h');
+      $('invest-wait').classList.remove('h');
+    }
+
+    $('player-game-plist').innerHTML = Object.entries(d.players).map(([pid, p]) =>
+      `<li class="pi ${pid === S.playerId ? 'me' : ''}">
+        <span class="pi-name">${p.name}${pid === S.playerId ? ' <span class="badge b-me">you</span>' : ''}</span>
+        <div class="sbar"><div class="sbar-f" style="width:${(p.share*100).toFixed(1)}%"></div></div>
+        <span class="pi-share">${f3(p.share)}</span>
+        <span class="badge ${p.submitted ? 'b-g' : 'b-gray'}">${p.submitted ? '✓' : '…'}</span>
+      </li>`
+    ).join('');
+    return;
+  }
+
+  if (d.status === 'round_results') {
+    const round = d.history.at(-1)?.round;
+    if (S.screen !== 'round-results' || S.resultsShownRound !== round) {
+      S.resultsShownRound = round;
+      go('round-results');
+      renderResults(d, d.history.at(-1));
+    }
+    $('res-admin-btns').classList.add('h');
+    $('res-player-wait').classList.remove('h');
+    $('res-finish-btn').classList.add('h');
+    return;
+  }
+
+  if (d.status === 'finished') {
+    if (S.screen === 'round-results') {
+      $('res-admin-btns').classList.add('h');
+      $('res-player-wait').classList.add('h');
+      $('res-finish-btn').classList.remove('h');
+    } else if (S.screen !== 'final') {
+      showFinal(d);
+    }
+  }
+}
+
+// ── Render round results table ─────────────────────────────────────────────
+function renderResults(d, hist) {
+  if (!hist) return;
+  rdots(hist.round, d.num_rounds, 'res-rdots');
+  $('res-title').textContent = `Round ${hist.round} Results`;
+
+  const p = d.params || {};
+  const A_g = hist.A_g ?? 0;
+  const gStr = d.g_realized != null ? `g = ${f3(d.g_realized)}` : `g ~ U(${f3(d.g_min)}, ${f3(d.g_max)})`;
+  $('res-meta').innerHTML =
+    `${gStr} &nbsp;|&nbsp; A<sub>g</sub> = ${f3(A_g)} &nbsp;|&nbsp; `
+    + `π<sub>p</sub>=${p.pi_p ?? 4}, π<sub>r</sub>=${p.pi_r ?? 3}, π<sub>q</sub>=${p.pi_q ?? 5}, `
+    + `c<sub>u</sub>=${p.c_u ?? 10}, c<sub>o</sub>=${p.c_o ?? 1}`;
+
+  const rows = Object.entries(hist.results)
+    .sort((a, b) => b[1].s_new - a[1].s_new);
+
+  $('res-tbody').innerHTML = rows.map(([pid, r]) => {
+    const isMe = pid === S.playerId;
+    const pos = r.pos_i;
+    const posCls = pos > 1e-6 ? 'b-g' : pos < -1e-6 ? 'b-r' : 'b-gray';
+    const posStr = pos > 1e-6 ? '+'+f3(pos)+' ↑' : pos < -1e-6 ? f3(pos)+' ↓' : '0 =';
+    let uw = '—';
+    if (r.lost   > 1e-6) uw = `<span style="color:var(--red)">u=−${f3(r.lost)}</span>`;
+    if (r.gained > 1e-6) uw = `<span style="color:var(--g)">w=+${f3(r.gained)}</span>`;
+    const sc = r.score ?? 0;
+    const scoreColor = sc >= 0 ? 'var(--g)' : 'var(--red)';
+    const pen = r.penalty ?? 0;
+    const penColor = pen < 0 ? 'var(--red)' : 'var(--muted)';
+    const stealColor = (r.reward_steal ?? 0) > 0 ? 'var(--g)' : 'var(--muted)';
+    return `<tr class="${isMe ? 'me' : ''}">
+      <td><strong>${r.name}</strong>${isMe ? ' <span class="badge b-me">you</span>' : ''}</td>
+      <td>${f3(r.s_i)}</td>
+      <td>${f3(r.a_i)}</td>
+      <td>${f3(r.gs_i)}</td>
+      <td><span class="badge ${posCls}">${posStr}</span></td>
+      <td>${uw}</td>
+      <td><strong>${f3(r.s_new)}</strong></td>
+      <td>${f3(r.reward_own)}</td>
+      <td>${f3(r.reward_2nd)}</td>
+      <td style="color:${stealColor}">${f3(r.reward_steal ?? 0)}</td>
+      <td style="color:${penColor}">${f3(pen)}</td>
+      <td><strong style="color:${scoreColor}">${f3(sc)}</strong></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Final results ──────────────────────────────────────────────────────────
+function showFinal(data) {
+  // Called from button or auto
+  go('final');
+  if (!data) { poll(); return; }
+  renderFinal(data);
+}
+
+async function showFinalFromBtn() {
+  const d = await fetch(`/api/rooms/${S.roomId}/state`).then(r => r.json());
+  showFinal(d);
+}
+
+function renderFinal(d) {
+  const sorted = Object.entries(d.players).sort((a, b) => b[1].total_score - a[1].total_score);
+  const medals = ['🥇','🥈','🥉'];
+
+  $('podium').innerHTML = sorted.slice(0,3).map(([pid, p], i) =>
+    `<div class="pod">
+      <div class="pod-rank">${medals[i] || i+1}</div>
+      <div class="pod-name">${p.name}${pid === S.playerId ? ' (you)':''}</div>
+      <div class="pod-score">${fr(p.total_score)}</div>
+    </div>`
+  ).join('');
+
+  $('final-tbody').innerHTML = sorted.map(([pid, p], i) =>
+    `<tr class="${pid === S.playerId ? 'me' : ''}">
+      <td>${medals[i] || i+1}</td>
+      <td><strong>${p.name}</strong>${pid === S.playerId ? ' <span class="badge b-me">you</span>':''}</td>
+      <td>${f3(p.share)}</td>
+      <td><strong>${fr(p.total_score)}</strong></td>
+    </tr>`
+  ).join('');
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+(function boot() {
+  // Fix showFinal button reference
+  $('res-finish-btn').querySelector('button').onclick = showFinalFromBtn;
+
+  const saved = load();
+  if (saved?.roomId) {
+    Object.assign(S, {
+      role: saved.role, roomId: saved.roomId, adminToken: saved.adminToken,
+      playerId: saved.playerId, playerName: saved.playerName,
+    });
+    if (S.role === 'admin') {
+      $('admin-code').textContent = S.roomId;
+      $('admin-token-msg').textContent = '🔑 Admin token: ' + S.adminToken;
+      go('admin-lobby');
+    } else {
+      $('player-code-disp').textContent = S.roomId;
+      $('lobby-title').textContent = `Hi ${S.playerName}! Rejoining…`;
+      go('player-lobby');
+    }
+    startPoll();
+  }
+})();
+</script>
+</body>
+</html>
