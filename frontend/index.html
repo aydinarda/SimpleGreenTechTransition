@@ -328,8 +328,11 @@ tr.me td{background:#e8f5e9;font-weight:600}
 
 <div class="toast" id="toast"></div>
 
+<script src="config.js"></script>
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
+const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
+
 const S = {
   role: null, roomId: null, adminToken: null, playerId: null, playerName: null,
   screen: 'landing', pollId: null,
@@ -386,11 +389,12 @@ function restart() {
 }
 
 async function api(method, path, body) {
-  const res = await fetch(path, {
+  const res = await fetch(API_BASE + path, {
     method, headers: {'Content-Type':'application/json'},
     body: body ? JSON.stringify(body) : undefined,
   });
-  const d = await res.json();
+  const text = await res.text();
+  const d = text ? JSON.parse(text) : {};
   if (!res.ok) throw new Error(d.detail || 'Error');
   return d;
 }
@@ -515,7 +519,7 @@ async function poll() {
     let url = `/api/rooms/${S.roomId}/state`;
     if (S.role === 'admin' && S.adminToken) url += `?admin_token=${S.adminToken}`;
     else if (S.playerId) url += `?player_id=${S.playerId}`;
-    const d = await fetch(url).then(r => r.json());
+    const d = await fetch(API_BASE + url).then(r => r.json());
     if (d.detail) return;
     handle(d);
   } catch {}
@@ -744,7 +748,7 @@ function showFinal(data) {
 }
 
 async function showFinalFromBtn() {
-  const d = await fetch(`/api/rooms/${S.roomId}/state`).then(r => r.json());
+  const d = await fetch(`${API_BASE}/api/rooms/${S.roomId}/state`).then(r => r.json());
   showFinal(d);
 }
 
