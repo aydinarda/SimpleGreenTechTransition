@@ -1,0 +1,141 @@
+name: E2E – Live Game Test on Render
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      render_url:
+        description: "Render URL (e.g. https://your-app.onrender.com)"
+        required: false
+
+env:
+  BASE_URL: ${{ inputs.render_url || secrets.RENDER_URL || 'https://simplegreentechtransitiongame.onrender.com' }}
+
+jobs:
+  e2e:
+    name: Full game – create → join → play → finish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      # ── 1. Is frontend loading correctly? ──────────────────────────────────────
+      - name: "Check: frontend loads (HTTP 200)"
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/")
+          echo "HTTP status: $STATUS"
+          [ "$STATUS" = "200" ] || { echo "FAIL: expected 200, got $STATUS"; exit 1; }
+
+      # ── 2. API – full game play ─────────────────────────────────────────────
+      - name: "Play a full game via API"
+        env:
+          BASE_URL: ${{ env.BASE_URL }}
+        run: |
+          python - <<'PYEOF'
+          import os, sys, json, requests
+
+          BASE = os.environ["BASE_URL"].rstrip("/")
+          s    = requests.Session()
+          s.headers["Content-Type"] = "application/json"
+
+          def ok(r, label=""):
+              if not r.ok:
+                  print(f"FAIL [{label}] {r.status_code}: {r.text}", file=sys.stderr)
+                  sys.exit(1)
+              data = r.json()
+              print(f"  OK  [{label}] {json.dumps(data)[:200]}")
+              return data
+
+          print("=== 1. Create room ===")
+          d = ok(s.post(f"{BASE}/api/rooms", json={
+              "g_min": 0.2, "g_max": 0.8, "num_rounds": 3,
+              "alpha": 0.0, "beta": 0.0,
+              "pi_p": 4.0, "pi_r": 3.0, "pi_q": 5.0,
+              "c_u": 10.0, "c_o": 1.0,
+          }), "create_room")
+          room_id     = d["room_id"]
+          admin_token = d["admin_token"]
+          print(f"  room_id={room_id}  admin_token={admin_token}")
+
+          print("=== 2. Join 2 players ===")
+          p1 = ok(s.post(f"{BASE}/api/rooms/{room_id}/join", json={"player_name": "Alice"}), "join Alice")
+          p2 = ok(s.post(f"{BASE}/api/rooms/{room_id}/join", json={"player_name": "Bob"}),   "join Bob")
+          pid1, pid2 = p1["player_id"], p2["player_id"]
+
+          print("=== 3. Start game ===")
+          ok(s.post(f"{BASE}/api/rooms/{room_id}/start", json={"admin_token": admin_token}), "start")
+
+          print("=== 4. Check state after start ===")
+          state = ok(s.get(f"{BASE}/api/rooms/{room_id}/state",
+                          params={"admin_token": admin_token}), "state-after-start")
+          assert state["status"] == "playing", f"Expected 'playing', got {state['status']}"
+          num_rounds = state["num_rounds"]
+          print(f"  num_rounds={num_rounds}")
+
+          # ── Play each round ──────────────────────────────────────────────────
+          for rnd in range(1, num_rounds + 1):
+              print(f"\n=== Round {rnd}/{num_rounds} ===")
+
+              state = s.get(f"{BASE}/api/rooms/{room_id}/state",
+                            params={"admin_token": admin_token}).json()
+              share1 = state["players"][pid1]["share"]
+              share2 = state["players"][pid2]["share"]
+              print(f"  Alice share={share1:.4f}  Bob share={share2:.4f}")
+
+              # Alice invests 50 % of her share, Bob invests 100 %
+              inv1 = round(share1 * 0.5,  4)
+              inv2 = round(share2 * 1.0,  4)
+
+              ok(s.post(f"{BASE}/api/rooms/{room_id}/submit",
+                        json={"player_id": pid1, "investment": inv1}), f"r{rnd}-submit-Alice")
+              ok(s.post(f"{BASE}/api/rooms/{room_id}/submit",
+                        json={"player_id": pid2, "investment": inv2}), f"r{rnd}-submit-Bob")
+
+              ok(s.post(f"{BASE}/api/rooms/{room_id}/resolve",
+                        json={"admin_token": admin_token}), f"r{rnd}-resolve")
+
+              state = s.get(f"{BASE}/api/rooms/{room_id}/state",
+                            params={"admin_token": admin_token}).json()
+              assert state["status"] == "round_results", f"Expected round_results, got {state['status']}"
+
+              last = state["history"][-1]
+              print(f"  A_g={last['A_g']:.4f}")
+              for pid, r in last["results"].items():
+                  name = r["name"]
+                  print(f"    {name}: score={r['score']:.3f}  s_new={r['s_new']:.4f}")
+
+              if rnd < num_rounds:
+                  ok(s.post(f"{BASE}/api/rooms/{room_id}/next_round",
+                            json={"admin_token": admin_token}), f"r{rnd}-next_round")
+              else:
+                  # last round – next_round should move to 'finished'
+                  ok(s.post(f"{BASE}/api/rooms/{room_id}/next_round",
+                            json={"admin_token": admin_token}), f"r{rnd}-next_round-finish")
+
+          print("\n=== 5. Verify final state ===")
+          state = ok(s.get(f"{BASE}/api/rooms/{room_id}/state",
+                           params={"admin_token": admin_token}), "final-state")
+          assert state["status"] == "finished", f"Expected 'finished', got {state['status']}"
+
+          scores = {pid: p["total_score"] for pid, p in state["players"].items()}
+          print(f"  Final scores: {scores}")
+          winner = max(scores, key=scores.get)
+          print(f"  Winner: {state['players'][winner]['name']}  ({scores[winner]:.3f})")
+
+          print("\n✅ All checks passed – game ran successfully on Render!")
+          PYEOF
+
+      # ── 3. API health check ──────────────────────────────────────
+      - name: "Check: unknown room returns 404"
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/rooms/ZZZZZZ/state")
+          echo "HTTP status for unknown room: $STATUS"
+          [ "$STATUS" = "404" ] || { echo "FAIL: expected 404, got $STATUS"; exit 1; }
