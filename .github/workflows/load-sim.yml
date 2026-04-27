@@ -192,6 +192,7 @@ jobs:
               join_rows  = []   # join_results.csv
               round_rows = []   # rounds_timing.csv
               final_rows = []   # final_scores.csv
+              g_values   = []
 
               async with aiohttp.ClientSession(timeout=timeout, connector=connector) as sess:
 
@@ -324,7 +325,8 @@ jobs:
                       if d and d.get("history"):
                           last   = d["history"][-1]
                           A_g    = last["A_g"]
-                          g_real = d.get("g_realized") or 0.0
+                          g_real = last.get("g_realized", d.get("g_realized") or 0.0)
+                          g_values.append(g_real)
                           rscores = [r["score"] for r in last["results"].values()]
                           avg_sc  = sum(rscores) / len(rscores)
                           print(f"  A_g={A_g:.4f}  g={g_real:.4f}  "
@@ -362,10 +364,17 @@ jobs:
                                               json={"admin_token": admin_token})
                       label = "next_round->finish" if rnd == N_ROUNDS else "next_round"
                       print(f"  POST /{label}: {lat*1000:.0f}ms  status={st}")
+                      if st != 200:
+                          print(f"  FATAL {label} r{rnd}: HTTP {st}  body={d}", flush=True)
+                          sys.exit(1)
 
                   # ── Phase 5: Final leaderboard ────────────────────────────
                   print("\n" + "=" * 66)
                   print("PHASE 5 – Final leaderboard")
+                  if len(set(round(g, 8) for g in g_values)) <= 1:
+                      print(f"  FATAL: g_realized did not change across rounds: {g_values}", flush=True)
+                      sys.exit(1)
+
                   d, _, _ = await get(sess, f"/api/rooms/{room_id}/state",
                                       phase="final",
                                       params={"admin_token": admin_token})

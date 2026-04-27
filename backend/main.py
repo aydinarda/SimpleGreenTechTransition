@@ -88,6 +88,10 @@ def _generate_market(n: int, major_share: float, major_player_frac: float) -> tu
     return shares[perm].tolist(), is_major[perm].tolist()
 
 
+def _draw_g(params: dict) -> float:
+    return float(np.random.uniform(params["g_min"], params["g_max"]))
+
+
 def _capped_softmax_allocation(cap: np.ndarray, weight: np.ndarray, total: float, tol: float = 1e-9) -> np.ndarray:
     """Allocate `total` proportionally via softmax weights, respecting cap[i] per player.
     Guarantees alloc.sum() == min(total, cap.sum()) by iteratively redistributing
@@ -255,9 +259,7 @@ async def start_game(room_id: str, req: AdminRequest):
     room["initial_shares"] = initial_shares
     room["initial_is_major"] = {pid: is_major_list[i] for i, pid in enumerate(room["players"])}
 
-    g_min = room["params"]["g_min"]
-    g_max = room["params"]["g_max"]
-    room["g_realized"] = float(np.random.uniform(g_min, g_max))
+    room["g_realized"] = _draw_g(room["params"])
 
     room["status"] = "playing"
     room["current_round"] = 1
@@ -299,12 +301,17 @@ async def resolve_round(room_id: str, req: AdminRequest):
         room["players"][pid]["share"] = r["s_new"]
         room["players"][pid]["total_score"] += r["score"]
 
-    room["history"].append({"round": room["current_round"], "results": results, "A_g": A_g})
+    room["history"].append({
+        "round": room["current_round"],
+        "g_realized": room["g_realized"],
+        "results": results,
+        "A_g": A_g,
+    })
     room["status"] = "round_results"
 
     await db_insert_round(room_id, room["current_round"], results, A_g)
 
-    return {"status": "round_results"}
+    return {"status": "round_results", "g_realized": room["g_realized"]}
 
 
 @app.post("/api/rooms/{room_id}/next_round")
@@ -321,7 +328,7 @@ def next_round(room_id: str, req: NextRoundRequest):
     for key in _UPDATABLE:
         val = getattr(req, key)
         if val is not None:
-            if key in ("major_share", "major_player_frac"):
+            if key in ("major_share", "major_player_frac") and val != room["params"][key]:
                 market_changed = True
             room["params"][key] = val
 
@@ -346,12 +353,10 @@ def next_round(room_id: str, req: NextRoundRequest):
         # Reset shares to initial and re-draw g for this round
         for pid, share in room["initial_shares"].items():
             room["players"][pid]["share"] = share
-        room["g_realized"] = float(np.random.uniform(
-            room["params"]["g_min"], room["params"]["g_max"]
-        ))
+        room["g_realized"] = _draw_g(room["params"])
         room["status"] = "playing"
 
-    return {"status": room["status"], "round": room["current_round"]}
+    return {"status": room["status"], "round": room["current_round"], "g_realized": room["g_realized"]}
 
 
 @app.get("/api/rooms/{room_id}/state")
