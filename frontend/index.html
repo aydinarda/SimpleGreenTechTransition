@@ -151,6 +151,19 @@ tr.me td{background:#e8f5e9;font-weight:600}
       <input type="number" id="p-rounds" value="6" min="1" max="20" step="1">
     </div>
   </div>
+  <h3 style="margin-top:1.4rem">Market structure</h3>
+  <div class="fg">
+    <div>
+      <label>Major player share — fraction of total market held by major players</label>
+      <input type="number" id="p-major-share" value="0.8" min="0.1" max="0.99" step="0.05">
+      <p style="font-size:.78rem;color:var(--muted);margin-top:.3rem">Default 0.8: major players collectively own 80% of the market.</p>
+    </div>
+    <div>
+      <label>Major player fraction — fraction of players designated as major</label>
+      <input type="number" id="p-major-frac" value="0.2" min="0.05" max="0.9" step="0.05">
+      <p style="font-size:.78rem;color:var(--muted);margin-top:.3rem">Default 0.2: 20% of players are major (Pareto-like structure).</p>
+    </div>
+  </div>
   <h3 style="margin-top:1.4rem">Weight parameters</h3>
   <div class="fg">
     <div>
@@ -415,8 +428,10 @@ async function createRoom() {
       pi_p:       parseFloat($('p-pip').value),
       pi_r:       parseFloat($('p-pir').value),
       pi_q:       parseFloat($('p-piq').value),
-      c_u:        parseFloat($('p-cu').value),
-      c_o:        parseFloat($('p-co').value),
+      c_u:               parseFloat($('p-cu').value),
+      c_o:               parseFloat($('p-co').value),
+      major_share:       parseFloat($('p-major-share').value),
+      major_player_frac: parseFloat($('p-major-frac').value),
     };
     const d = await api('POST', '/api/rooms', body);
     S.role = 'admin'; S.roomId = d.room_id; S.adminToken = d.admin_token;

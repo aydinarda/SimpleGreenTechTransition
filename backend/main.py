@@ -32,13 +32,15 @@ class CreateRoomRequest(BaseModel):
     g_min: float
     g_max: float
     num_rounds: int = 6
-    alpha: float = 0.0   # underinvestor weight: 0=market share, 1=effort (log shortage)
-    beta: float = 0.0    # overinvestor weight:  0=market share, 1=effort (log excess)
-    pi_p: float = 4.0    # reward per green customer served (own allocation)
-    pi_r: float = 3.0    # reward per green customer served (2nd stage residual)
-    pi_q: float = 5.0    # reward per stolen green customer
-    c_u: float = 10.0    # penalty per customer lost (underinvestors)
-    c_o: float = 1.0     # penalty per unit of failed stealing (overinvestors)
+    alpha: float = 0.0          # underinvestor weight: 0=market share, 1=effort (log shortage)
+    beta: float = 0.0           # overinvestor weight:  0=market share, 1=effort (log excess)
+    pi_p: float = 4.0           # reward per green customer served (own allocation)
+    pi_r: float = 3.0           # reward per green customer served (2nd stage residual)
+    pi_q: float = 5.0           # reward per stolen green customer
+    c_u: float = 10.0           # penalty per customer lost (underinvestors)
+    c_o: float = 1.0            # penalty per unit of failed stealing (overinvestors)
+    major_share: float = 0.8    # fraction of total market held by major players
+    major_player_frac: float = 0.2  # fraction of players designated as major
 
 class JoinRequest(BaseModel):
     player_name: str
@@ -52,6 +54,24 @@ class AdminRequest(BaseModel):
 
 
 # ─── Core game logic ──────────────────────────────────────────────────────────
+
+def _generate_market(n: int, major_share: float, major_player_frac: float) -> tuple:
+    """Two-group Dirichlet: n_major players hold major_share of total market,
+    n_minor hold (1 - major_share). Indices are shuffled so join order is neutral."""
+    rng = np.random.default_rng()
+    n_major = max(1, round(n * major_player_frac))
+    n_minor = n - n_major
+    major_part = rng.dirichlet(np.ones(n_major)) * major_share
+    if n_minor > 0:
+        minor_part = rng.dirichlet(np.ones(n_minor)) * (1 - major_share)
+        shares   = np.concatenate([major_part, minor_part])
+        is_major = np.array([True] * n_major + [False] * n_minor)
+    else:
+        shares   = major_part
+        is_major = np.ones(n_major, dtype=bool)
+    perm = rng.permutation(n)
+    return shares[perm].tolist(), is_major[perm].tolist()
+
 
 def _capped_softmax_allocation(cap: np.ndarray, weight: np.ndarray, total: float, tol: float = 1e-9) -> np.ndarray:
     """Allocate `total` proportionally via softmax weights, respecting cap[i] per player.
@@ -166,6 +186,8 @@ async def create_room(req: CreateRoomRequest):
         "alpha": req.alpha, "beta": req.beta,
         "pi_p": req.pi_p, "pi_r": req.pi_r, "pi_q": req.pi_q,
         "c_u": req.c_u, "c_o": req.c_o,
+        "major_share": req.major_share,
+        "major_player_frac": req.major_player_frac,
     }
     rooms[room_id] = {
         "room_id": room_id,
@@ -205,12 +227,18 @@ async def start_game(room_id: str, req: AdminRequest):
     if len(room["players"]) < 2: raise HTTPException(400, "Need at least 2 players")
 
     n = len(room["players"])
-    shares = np.random.dirichlet(np.ones(n)).tolist()
+    shares, is_major_list = _generate_market(
+        n,
+        room["params"]["major_share"],
+        room["params"]["major_player_frac"],
+    )
     initial_shares = {}
     for i, pid in enumerate(room["players"]):
-        room["players"][pid]["share"] = shares[i]
+        room["players"][pid]["share"]    = shares[i]
+        room["players"][pid]["is_major"] = is_major_list[i]
         initial_shares[pid] = shares[i]
     room["initial_shares"] = initial_shares
+    room["initial_is_major"] = {pid: is_major_list[i] for i, pid in enumerate(room["players"])}
 
     g_min = room["params"]["g_min"]
     g_max = room["params"]["g_max"]
@@ -298,6 +326,7 @@ def get_state(room_id: str, player_id: Optional[str] = None, admin_token: Option
             "total_score": p["total_score"],
             "submitted": pid in room["submissions"],
             "is_me": pid == player_id,
+            "is_major": p.get("is_major"),
         }
 
     return {
