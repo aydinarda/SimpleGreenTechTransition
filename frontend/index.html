@@ -326,8 +326,6 @@ tr.me td{background:#e8f5e9;font-weight:600}
         <div><label>π<sub>q</sub></label><input type="number" id="rp-piq" step="0.5" min="0"></div>
         <div><label>c<sub>u</sub></label><input type="number" id="rp-cu" step="0.5" min="0"></div>
         <div><label>c<sub>o</sub></label><input type="number" id="rp-co" step="0.5" min="0"></div>
-        <div><label>Major share</label><input type="number" id="rp-major-share" step="0.05" min="0.1" max="0.99"></div>
-        <div><label>Major frac</label><input type="number" id="rp-major-frac" step="0.05" min="0.05" max="0.9"></div>
       </div>
     </details>
     <button class="btn btn-s btn-w" id="next-btn" onclick="nextRound()">Next Round →</button>
@@ -523,7 +521,6 @@ function _fillRoundParams(params) {
     'rp-alpha': 'alpha', 'rp-beta': 'beta',
     'rp-pip': 'pi_p', 'rp-pir': 'pi_r', 'rp-piq': 'pi_q',
     'rp-cu': 'c_u', 'rp-co': 'c_o',
-    'rp-major-share': 'major_share', 'rp-major-frac': 'major_player_frac',
   };
   for (const [id, key] of Object.entries(map)) {
     if (params[key] !== undefined) $(id).value = params[key];
@@ -537,7 +534,6 @@ async function nextRound() {
     'rp-alpha': 'alpha', 'rp-beta': 'beta',
     'rp-pip': 'pi_p', 'rp-pir': 'pi_r', 'rp-piq': 'pi_q',
     'rp-cu': 'c_u', 'rp-co': 'c_o',
-    'rp-major-share': 'major_share', 'rp-major-frac': 'major_player_frac',
   };
   for (const [id, key] of Object.entries(map)) {
     const v = $(id)?.value;

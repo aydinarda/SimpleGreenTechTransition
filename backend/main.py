@@ -64,8 +64,6 @@ class NextRoundRequest(BaseModel):
     pi_q: Optional[float] = None
     c_u: Optional[float] = None
     c_o: Optional[float] = None
-    major_share: Optional[float] = None
-    major_player_frac: Optional[float] = None
 
 
 # ─── Core game logic ──────────────────────────────────────────────────────────
@@ -322,14 +320,10 @@ def next_round(room_id: str, req: NextRoundRequest):
     if room["status"] != "round_results": raise HTTPException(400, "Not in round_results phase")
 
     # Apply optional param overrides
-    _UPDATABLE = ["g_min", "g_max", "alpha", "beta", "pi_p", "pi_r", "pi_q", "c_u", "c_o",
-                  "major_share", "major_player_frac"]
-    market_changed = False
+    _UPDATABLE = ["g_min", "g_max", "alpha", "beta", "pi_p", "pi_r", "pi_q", "c_u", "c_o"]
     for key in _UPDATABLE:
         val = getattr(req, key)
         if val is not None:
-            if key in ("major_share", "major_player_frac") and val != room["params"][key]:
-                market_changed = True
             room["params"][key] = val
 
     room["current_round"] += 1
@@ -338,18 +332,6 @@ def next_round(room_id: str, req: NextRoundRequest):
     if room["current_round"] > room["params"]["num_rounds"]:
         room["status"] = "finished"
     else:
-        # Regenerate market if structure params changed
-        if market_changed:
-            n = len(room["players"])
-            new_shares, new_is_major = _generate_market(
-                n, room["params"]["major_share"], room["params"]["major_player_frac"]
-            )
-            pids = list(room["players"].keys())
-            room["initial_shares"]   = {pid: new_shares[i]   for i, pid in enumerate(pids)}
-            room["initial_is_major"] = {pid: new_is_major[i] for i, pid in enumerate(pids)}
-            for pid in pids:
-                room["players"][pid]["is_major"] = room["initial_is_major"][pid]
-
         # Reset shares to initial and re-draw g for this round
         for pid, share in room["initial_shares"].items():
             room["players"][pid]["share"] = share
