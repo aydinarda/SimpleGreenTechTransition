@@ -21,7 +21,6 @@ env/
 # Environment variables
 .env
 .env.*
-frontend/config.js
 
 # IDE
 .vscode/

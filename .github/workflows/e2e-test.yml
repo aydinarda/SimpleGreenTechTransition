@@ -10,7 +10,7 @@ on:
         required: false
 
 env:
-  BASE_URL: ${{ inputs.render_url || secrets.RENDER_URL || 'https://simplegreentechtransition-1.onrender.com' }}
+  BASE_URL: ${{ inputs.render_url || secrets.RENDER_URL || 'https://simplegreentechtransition.onrender.com' }}
 
 jobs:
   e2e:
@@ -27,20 +27,22 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      # Render free tier sleeps after inactivity – wake it up before testing
-      - name: "Wake up Render (cold-start)"
+      # Render free tier sleeps after inactivity – wake the backend API, not the static site
+      - name: "Wake up backend (cold-start)"
         run: |
-          echo "Pinging $BASE_URL until it responds with 200..."
+          echo "Pinging backend API until it responds..."
           for i in 1 2 3 4 5 6; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 40 "$BASE_URL/")
-            echo "  Attempt $i: HTTP $STATUS"
-            [ "$STATUS" = "200" ] && { echo "  Server is up."; break; }
-            [ "$i" = "6" ] && { echo "FAIL: server did not wake up"; exit 1; }
+            BODY=$(curl -s --max-time 40 -X POST "$BASE_URL/api/rooms" \
+              -H "Content-Type: application/json" \
+              -d '{"g_min":0.1,"g_max":0.9,"num_rounds":1,"alpha":0,"beta":0,"pi_p":4,"pi_r":3,"pi_q":5,"c_u":10,"c_o":1}')
+            echo "  Attempt $i: $BODY"
+            echo "$BODY" | grep -q "room_id" && { echo "  Backend is up."; break; }
+            [ "$i" = "6" ] && { echo "FAIL: backend did not wake up"; exit 1; }
             sleep 10
           done
 
-      # ── 1. Frontend loads ────────────────────────────────────────────────────
-      - name: "Check: frontend loads (HTTP 200)"
+      # ── 1. Backend root responds ─────────────────────────────────────────────
+      - name: "Check: backend responds (HTTP 200)"
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/")
           echo "HTTP status: $STATUS"

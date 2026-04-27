@@ -8,7 +8,7 @@ on:
         required: false
 
 env:
-  BASE_URL: ${{ inputs.render_url || secrets.RENDER_URL || 'https://simplegreentechtransition-1.onrender.com' }}
+  BASE_URL: ${{ inputs.render_url || secrets.RENDER_URL || 'https://simplegreentechtransition.onrender.com' }}
 
 jobs:
   simulate:
