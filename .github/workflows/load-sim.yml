@@ -8,7 +8,7 @@ on:
         required: false
 
 env:
-  BASE_URL: ${{ inputs.render_url || secrets.RENDER_URL || 'https://simplegreentechtransitiongame.onrender.com' }}
+  BASE_URL: ${{ inputs.render_url || secrets.RENDER_URL || 'https://simplegreentechtransition-1.onrender.com' }}
 
 jobs:
   simulate:
@@ -25,6 +25,9 @@ jobs:
       - name: Install aiohttp
         run: pip install aiohttp
 
+      - name: Create results directory
+        run: mkdir -p results
+
       # Render free tier may be sleeping – wake it up first
       - name: "Wake up Render (cold-start)"
         run: |
@@ -36,24 +39,29 @@ jobs:
             sleep 8
           done
 
-      # ── Main simulation ─────────────────────────────────────────────────────
+      # ── Main simulation – writes CSV/JSON/TXT into ./results/ ──────────────
       - name: "Run 50-player simulation"
         env:
           BASE_URL: ${{ env.BASE_URL }}
+          RESULTS_DIR: results
         run: |
           python - <<'PYEOF'
-          import asyncio, aiohttp, time, statistics, random, os, sys
+          import asyncio, aiohttp, time, statistics, random, os, sys, csv, json
+          from datetime import datetime, timezone
 
-          BASE      = os.environ["BASE_URL"].rstrip("/")
-          N_PLAYERS = 50
-          N_ROUNDS  = 6
+          BASE        = os.environ["BASE_URL"].rstrip("/")
+          OUT         = os.environ.get("RESULTS_DIR", "results")
+          N_PLAYERS   = 50
+          N_ROUNDS    = 6
 
-          # ── Investment strategies (groups of 10) ──────────────────────────
-          # Group 0 (10 players): free rider      – invest 0%
-          # Group 1 (10 players): conservative    – invest 30%
-          # Group 2 (10 players): random          – invest 0–100%
-          # Group 3 (10 players): aggressive      – invest 80%
-          # Group 4 (10 players): all-in          – invest 100%
+          os.makedirs(OUT, exist_ok=True)
+
+          # ── Investment strategies (groups of 10) ───────────────────────────
+          # Group 0: Free Rider    – invest 0%
+          # Group 1: Conservative  – invest 30%
+          # Group 2: Random        – invest 0-100%
+          # Group 3: Aggressive    – invest 80%
+          # Group 4: All-In        – invest 100%
           def strategy(idx, share):
               g = idx % 5
               if   g == 0: return 0.0
@@ -62,71 +70,110 @@ jobs:
               elif g == 3: return share * 0.80
               else:        return share
 
-          STRATEGY_NAMES = ["Free Rider (0%)", "Conservative (30%)",
-                            "Random (0-100%)", "Aggressive (80%)", "All-In (100%)"]
+          STRAT = ["Free Rider (0%)", "Conservative (30%)",
+                   "Random (0-100%)", "Aggressive (80%)", "All-In (100%)"]
 
-          # ── Statistics helper ─────────────────────────────────────────────
-          def latency_row(lats, label):
-              if not lats:
-                  print(f"  {label:<26}: no data"); return
-              ms = sorted(x * 1000 for x in lats)
-              p95 = ms[min(int(len(ms) * 0.95), len(ms) - 1)]
-              print(f"  {label:<26}: "
-                    f"min={min(ms):5.0f}ms  "
-                    f"avg={statistics.mean(ms):5.0f}ms  "
-                    f"p95={p95:5.0f}ms  "
-                    f"max={max(ms):5.0f}ms  "
-                    f"n={len(ms)}")
+          # ── Request log (every HTTP call) ──────────────────────────────────
+          req_log = []
 
-          # ── HTTP helpers ──────────────────────────────────────────────────
-          async def post(session, path, **kwargs):
+          def log_req(phase, rnd, player, endpoint, method, status, lat_s):
+              req_log.append({
+                  "timestamp":  datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3],
+                  "phase":      phase,
+                  "round":      rnd if rnd is not None else "",
+                  "player":     player,
+                  "endpoint":   endpoint,
+                  "method":     method,
+                  "status":     status,
+                  "latency_ms": round(lat_s * 1000, 1),
+                  "ok":         1 if 200 <= (status or 0) < 300 else 0,
+              })
+
+          # ── HTTP helpers ───────────────────────────────────────────────────
+          async def post(sess, path, phase="", rnd=None, player="", **kw):
               t0 = time.perf_counter()
               try:
-                  async with session.post(BASE + path, **kwargs) as r:
+                  async with sess.post(BASE + path, **kw) as r:
                       data = await r.json(content_type=None)
-                      return data, time.perf_counter() - t0, r.status
+                      lat  = time.perf_counter() - t0
+                      log_req(phase, rnd, player, path, "POST", r.status, lat)
+                      return data, lat, r.status
               except Exception as e:
-                  return {"error": str(e)}, time.perf_counter() - t0, 0
+                  lat = time.perf_counter() - t0
+                  log_req(phase, rnd, player, path, "POST", 0, lat)
+                  return {"error": str(e)}, lat, 0
 
-          async def get(session, path, **kwargs):
+          async def get(sess, path, phase="", rnd=None, player="", **kw):
               t0 = time.perf_counter()
               try:
-                  async with session.get(BASE + path, **kwargs) as r:
+                  async with sess.get(BASE + path, **kw) as r:
                       data = await r.json(content_type=None)
-                      return data, time.perf_counter() - t0, r.status
+                      lat  = time.perf_counter() - t0
+                      log_req(phase, rnd, player, path, "GET", r.status, lat)
+                      return data, lat, r.status
               except Exception as e:
-                  return {"error": str(e)}, time.perf_counter() - t0, 0
+                  lat = time.perf_counter() - t0
+                  log_req(phase, rnd, player, path, "GET", 0, lat)
+                  return {"error": str(e)}, lat, 0
 
-          # ── Main ──────────────────────────────────────────────────────────
+          # ── Statistics helpers ─────────────────────────────────────────────
+          def pct(lst, p):
+              if not lst: return 0.0
+              s = sorted(lst)
+              return s[min(int(len(s) * p / 100), len(s) - 1)]
+
+          def lat_stats(lats_s):
+              if not lats_s:
+                  return {"min": 0, "avg": 0, "p50": 0, "p95": 0, "max": 0, "n": 0}
+              ms = [x * 1000 for x in lats_s]
+              return {
+                  "min": round(min(ms),              1),
+                  "avg": round(statistics.mean(ms),  1),
+                  "p50": round(pct(ms, 50),          1),
+                  "p95": round(pct(ms, 95),          1),
+                  "max": round(max(ms),              1),
+                  "n":   len(ms),
+              }
+
+          def lat_line(st, label):
+              return (f"  {label:<28}: "
+                      f"min={st['min']:6.0f}ms  avg={st['avg']:6.0f}ms  "
+                      f"p95={st['p95']:6.0f}ms  max={st['max']:6.0f}ms  "
+                      f"n={st['n']}")
+
+          # ════════════════════════════════════════════════════════════════════
           async def main():
-              total_t0  = time.perf_counter()
-              timeout   = aiohttp.ClientTimeout(total=30)
-              connector = aiohttp.TCPConnector(limit=80, force_close=False)
-              round_log = []
+              sim_start  = datetime.now(timezone.utc)
+              total_t0   = time.perf_counter()
+              timeout    = aiohttp.ClientTimeout(total=30)
+              connector  = aiohttp.TCPConnector(limit=80, force_close=False)
 
-              async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+              join_rows  = []   # join_results.csv
+              round_rows = []   # rounds_timing.csv
+              final_rows = []   # final_scores.csv
+
+              async with aiohttp.ClientSession(timeout=timeout, connector=connector) as sess:
 
                   # ── Phase 1: Create room ──────────────────────────────────
-                  print("\n" + "=" * 64)
+                  print("\n" + "=" * 66)
                   print("PHASE 1 – Create room")
-                  d, lat, st = await post(session, "/api/rooms", json={
+                  d, lat, st = await post(sess, "/api/rooms", phase="setup", json={
                       "g_min": 0.1, "g_max": 0.9, "num_rounds": N_ROUNDS,
                       "alpha": 0.0, "beta": 0.0,
-                      "pi_p": 4.0, "pi_r": 3.0, "pi_q": 5.0,
-                      "c_u": 10.0, "c_o": 1.0,
+                      "pi_p": 4.0,  "pi_r": 3.0, "pi_q": 5.0,
+                      "c_u":  10.0, "c_o":  1.0,
                   })
-                  if st != 200:
-                      print(f"  FATAL: {d}"); sys.exit(1)
-                  room_id     = d["room_id"]
-                  admin_token = d["admin_token"]
-                  print(f"  room_id={room_id}   latency={lat*1000:.0f}ms")
+                  if st != 200: print(f"  FATAL: {d}"); sys.exit(1)
+                  room_id, admin_token = d["room_id"], d["admin_token"]
+                  print(f"  room_id={room_id}  latency={lat*1000:.0f}ms")
 
                   # ── Phase 2: 50 players join concurrently ─────────────────
-                  print("\n" + "=" * 64)
+                  print("\n" + "=" * 66)
                   print(f"PHASE 2 – {N_PLAYERS} players joining concurrently")
                   t0 = time.perf_counter()
                   join_results = await asyncio.gather(*[
-                      post(session, f"/api/rooms/{room_id}/join",
+                      post(sess, f"/api/rooms/{room_id}/join",
+                           phase="join", player=f"Student_{i+1:02d}",
                            json={"player_name": f"Student_{i+1:02d}"})
                       for i in range(N_PLAYERS)
                   ])
@@ -134,152 +181,399 @@ jobs:
 
                   players, join_lats, join_errs = {}, [], 0
                   for i, (data, lat, st) in enumerate(join_results):
-                      if st == 200 and data and "player_id" in data:
-                          players[i] = {"player_id": data["player_id"],
-                                        "name":      data["player_name"]}
+                      ok = st == 200 and data and "player_id" in data
+                      join_rows.append({
+                          "player_index":   i,
+                          "player_name":    f"Student_{i+1:02d}",
+                          "strategy_group": i % 5,
+                          "strategy_name":  STRAT[i % 5],
+                          "player_id":      data.get("player_id", "") if ok else "",
+                          "status_code":    st,
+                          "latency_ms":     round(lat * 1000, 1),
+                          "success":        1 if ok else 0,
+                          "error":          "" if ok else str(data),
+                      })
+                      if ok:
+                          players[i] = {"player_id": data["player_id"], "name": data["player_name"]}
                           join_lats.append(lat)
                       else:
                           join_errs += 1
                           print(f"  x Student_{i+1:02d} failed: status={st}")
 
+                  js = lat_stats(join_lats)
                   print(f"  Wall time  : {join_wall:.2f}s")
-                  print(f"  Successful : {len(players)}/{N_PLAYERS}")
-                  print(f"  Errors     : {join_errs}")
-                  latency_row(join_lats, "JOIN latency")
-
-                  if len(players) < 2:
-                      print("FATAL: need at least 2 players"); sys.exit(1)
+                  print(f"  Successful : {len(players)}/{N_PLAYERS}  |  Errors: {join_errs}")
+                  print(lat_line(js, "JOIN latency"))
+                  if len(players) < 2: print("FATAL: need at least 2 players"); sys.exit(1)
 
                   # ── Phase 3: Start game ───────────────────────────────────
-                  print("\n" + "=" * 64)
+                  print("\n" + "=" * 66)
                   print("PHASE 3 – Start game")
-                  d, lat, st = await post(session, f"/api/rooms/{room_id}/start",
+                  d, lat, st = await post(sess, f"/api/rooms/{room_id}/start",
+                                          phase="setup",
                                           json={"admin_token": admin_token})
-                  print(f"  status={d.get('status','?') if d else st}   latency={lat*1000:.0f}ms")
-                  if st != 200:
-                      print(f"  FATAL: {d}"); sys.exit(1)
+                  print(f"  status={d.get('status','?') if d else st}  latency={lat*1000:.0f}ms")
+                  if st != 200: print(f"  FATAL: {d}"); sys.exit(1)
 
                   # ── Phase 4: Play rounds ──────────────────────────────────
                   pid_list = [players[i]["player_id"] for i in sorted(players)]
 
                   for rnd in range(1, N_ROUNDS + 1):
-                      print("\n" + "-" * 64)
+                      print("\n" + "-" * 66)
                       print(f"  ROUND {rnd}/{N_ROUNDS}")
+                      rnd_t0 = time.perf_counter()
 
-                      # 4a. All players fetch state concurrently
+                      # 4a. All 50 players GET state concurrently
                       t0 = time.perf_counter()
-                      state_results = await asyncio.gather(*[
-                          get(session, f"/api/rooms/{room_id}/state",
-                              params={"player_id": pid})
-                          for pid in pid_list
+                      state_res = await asyncio.gather(*[
+                          get(sess, f"/api/rooms/{room_id}/state",
+                              phase="state", rnd=rnd, player=pid_list[i],
+                              params={"player_id": pid_list[i]})
+                          for i in range(len(pid_list))
                       ])
                       state_wall = time.perf_counter() - t0
-                      state_lats = [lat for _, lat, st in state_results if st == 200]
-                      state_errs = sum(1 for _, _, st in state_results if st != 200)
+                      state_lats = [lat for _, lat, st in state_res if st == 200]
+                      state_errs = sum(1 for _, _, st in state_res if st != 200)
+                      ss = lat_stats(state_lats)
                       print(f"  GET /state   : wall={state_wall:.2f}s  errors={state_errs}")
-                      latency_row(state_lats, "    state latency")
+                      print(lat_line(ss, "    state latency"))
 
-                      # 4b. Compute investments per player
+                      # 4b. Compute each player's investment
                       investments = {}
-                      for i, (data, _, st) in enumerate(state_results):
+                      for i, (data, _, st) in enumerate(state_res):
                           if st == 200 and data and data.get("my_share") is not None:
-                              pid   = pid_list[i]
-                              investments[pid] = round(strategy(i, data["my_share"]), 6)
+                              investments[pid_list[i]] = round(strategy(i, data["my_share"]), 6)
 
-                      # 4c. All players submit investments concurrently
+                      # 4c. All 50 players POST submit concurrently
                       t0 = time.perf_counter()
-                      submit_results = await asyncio.gather(*[
-                          post(session, f"/api/rooms/{room_id}/submit",
+                      submit_res = await asyncio.gather(*[
+                          post(sess, f"/api/rooms/{room_id}/submit",
+                               phase="submit", rnd=rnd, player=pid,
                                json={"player_id": pid, "investment": inv})
                           for pid, inv in investments.items()
                       ])
                       submit_wall = time.perf_counter() - t0
-                      sub_lats = [lat for _, lat, st in submit_results if st == 200]
-                      sub_errs = sum(1 for _, _, st in submit_results if st != 200)
+                      sub_lats = [lat for _, lat, st in submit_res if st == 200]
+                      sub_errs = sum(1 for _, _, st in submit_res if st != 200)
+                      subs = lat_stats(sub_lats)
                       print(f"  POST /submit : wall={submit_wall:.2f}s  errors={sub_errs}")
-                      latency_row(sub_lats, "    submit latency")
+                      print(lat_line(subs, "    submit latency"))
 
-                      # 4d. Admin resolves the round
-                      d, lat, st = await post(session, f"/api/rooms/{room_id}/resolve",
-                                              json={"admin_token": admin_token})
-                      print(f"  POST /resolve: {lat*1000:.0f}ms  status={st}")
-                      if st != 200:
-                          print(f"  FATAL resolve: {d}"); sys.exit(1)
+                      # 4d. Admin resolves
+                      d, resolve_lat, st = await post(sess, f"/api/rooms/{room_id}/resolve",
+                                                      phase="resolve", rnd=rnd,
+                                                      json={"admin_token": admin_token})
+                      print(f"  POST /resolve: {resolve_lat*1000:.0f}ms  status={st}")
+                      if st != 200: print(f"  FATAL: {d}"); sys.exit(1)
 
                       # 4e. Fetch round results
-                      d, _, _ = await get(session, f"/api/rooms/{room_id}/state",
+                      d, _, _ = await get(sess, f"/api/rooms/{room_id}/state",
+                                          phase="result", rnd=rnd,
                                           params={"admin_token": admin_token})
-                      rscores = []
+                      rscores, A_g, g_real = [], 0.0, 0.0
                       if d and d.get("history"):
-                          last    = d["history"][-1]
+                          last   = d["history"][-1]
+                          A_g    = last["A_g"]
+                          g_real = d.get("g_realized") or 0.0
                           rscores = [r["score"] for r in last["results"].values()]
                           avg_sc  = sum(rscores) / len(rscores)
-                          print(f"  A_g={last['A_g']:.4f}   "
-                                f"round scores: min={min(rscores):.2f}  "
-                                f"avg={avg_sc:.2f}  max={max(rscores):.2f}")
+                          print(f"  A_g={A_g:.4f}  g={g_real:.4f}  "
+                                f"scores: min={min(rscores):.2f}  avg={avg_sc:.2f}  max={max(rscores):.2f}")
 
-                      round_log.append({
-                          "rnd": rnd, "A_g": last.get("A_g", 0) if d and d.get("history") else 0,
-                          "sub_wall": submit_wall, "state_wall": state_wall,
-                          "state_lats": state_lats, "sub_lats": sub_lats,
-                          "rscores": rscores, "state_errs": state_errs, "sub_errs": sub_errs,
+                      rnd_wall = time.perf_counter() - rnd_t0
+                      round_rows.append({
+                          "round":             rnd,
+                          "g_realized":        round(g_real,       4),
+                          "A_g":               round(A_g,          4),
+                          "total_round_wall_s": round(rnd_wall,    3),
+                          "state_wall_s":      round(state_wall,   3),
+                          "state_min_ms":      ss["min"],
+                          "state_avg_ms":      ss["avg"],
+                          "state_p95_ms":      ss["p95"],
+                          "state_max_ms":      ss["max"],
+                          "state_errors":      state_errs,
+                          "submit_wall_s":     round(submit_wall,  3),
+                          "submit_min_ms":     subs["min"],
+                          "submit_avg_ms":     subs["avg"],
+                          "submit_p95_ms":     subs["p95"],
+                          "submit_max_ms":     subs["max"],
+                          "submit_errors":     sub_errs,
+                          "resolve_ms":        round(resolve_lat * 1000, 1),
+                          "avg_round_score":   round(sum(rscores)/len(rscores), 3) if rscores else 0,
+                          "min_round_score":   round(min(rscores), 3) if rscores else 0,
+                          "max_round_score":   round(max(rscores), 3) if rscores else 0,
+                          "_state_lats":       state_lats,
+                          "_sub_lats":         sub_lats,
                       })
 
-                      # 4f. Next round (or finish)
-                      d, lat, st = await post(session, f"/api/rooms/{room_id}/next_round",
+                      # 4f. Next round / finish
+                      d, lat, st = await post(sess, f"/api/rooms/{room_id}/next_round",
+                                              phase="next_round", rnd=rnd,
                                               json={"admin_token": admin_token})
-                      label = "next_round→finish" if rnd == N_ROUNDS else "next_round"
+                      label = "next_round->finish" if rnd == N_ROUNDS else "next_round"
                       print(f"  POST /{label}: {lat*1000:.0f}ms  status={st}")
 
                   # ── Phase 5: Final leaderboard ────────────────────────────
-                  print("\n" + "=" * 64)
+                  print("\n" + "=" * 66)
                   print("PHASE 5 – Final leaderboard")
-                  d, _, _ = await get(session, f"/api/rooms/{room_id}/state",
+                  d, _, _ = await get(sess, f"/api/rooms/{room_id}/state",
+                                      phase="final",
                                       params={"admin_token": admin_token})
+                  pid_to_idx = {players[i]["player_id"]: i for i in players}
                   if d:
                       assert d["status"] == "finished", \
                           f"Expected 'finished', got '{d['status']}'"
-                      ranked = sorted(d["players"].values(),
-                                      key=lambda p: p["total_score"], reverse=True)
-                      medals = ["#1", "#2", "#3"]
-                      print(f"\n  {'Rank':<5} {'Name':<15} {'Share':>10} {'Total Score':>13}")
-                      print(f"  {'─'*5} {'─'*15} {'─'*10} {'─'*13}")
-                      for rank, p in enumerate(ranked, 1):
-                          tag = " <-- WINNER" if rank == 1 else ""
-                          print(f"  {rank:<5} {p['name']:<15} {p['share']:>10.4f} "
-                                f"{p['total_score']:>13.3f}{tag}")
+                      ranked = sorted(d["players"].items(),
+                                     key=lambda kv: kv[1]["total_score"], reverse=True)
+                      print(f"\n  {'Rank':<5} {'Name':<16} {'Strategy':<22} "
+                            f"{'Score':>10} {'Share':>8}")
+                      print(f"  {'─'*5} {'─'*16} {'─'*22} {'─'*10} {'─'*8}")
+                      for rank, (pid, p) in enumerate(ranked, 1):
+                          idx   = pid_to_idx.get(pid, -1)
+                          strat = STRAT[idx % 5] if idx >= 0 else "?"
+                          tag   = " <-- WINNER" if rank == 1 else ""
+                          print(f"  {rank:<5} {p['name']:<16} {strat:<22} "
+                                f"{p['total_score']:>10.3f} {p['share']:>8.4f}{tag}")
+                          final_rows.append({
+                              "rank":           rank,
+                              "player_name":    p["name"],
+                              "player_id":      pid,
+                              "strategy_group": idx % 5 if idx >= 0 else -1,
+                              "strategy_name":  strat,
+                              "total_score":    round(p["total_score"], 3),
+                              "final_share":    round(p["share"],       4),
+                          })
 
-                  # ── Summary table ─────────────────────────────────────────
-                  total_time     = time.perf_counter() - total_t0
-                  all_sub_lats   = [l for r in round_log for l in r["sub_lats"]]
-                  all_state_lats = [l for r in round_log for l in r["state_lats"]]
-                  total_sub_errs = sum(r["sub_errs"]   for r in round_log)
-                  total_st_errs  = sum(r["state_errs"] for r in round_log)
+              # ── Write artifact files ────────────────────────────────────────
+              total_time = time.perf_counter() - total_t0
+              all_sub_lats   = [l for r in round_rows for l in r["_sub_lats"]]
+              all_state_lats = [l for r in round_rows for l in r["_state_lats"]]
 
-                  print("\n" + "=" * 64)
-                  print("SIMULATION SUMMARY")
-                  print(f"  Players joined : {len(players)}/{N_PLAYERS}")
-                  print(f"  Rounds played  : {N_ROUNDS}")
-                  print(f"  Total time     : {total_time:.1f}s")
-                  print(f"  Total errors   : submit={total_sub_errs}  state={total_st_errs}")
-                  print()
-                  latency_row(all_state_lats, "GET /state  (all rounds)")
-                  latency_row(all_sub_lats,   "POST /submit (all rounds)")
-                  print()
-                  print(f"  {'Rnd':<5} {'A_g':>8} {'StateWall':>10} {'SubWall':>9} "
-                        f"{'AvgScore':>9} {'SubErr':>7}")
-                  print(f"  {'─'*5} {'─'*8} {'─'*10} {'─'*9} {'─'*9} {'─'*7}")
-                  for r in round_log:
-                      avg = sum(r["rscores"]) / len(r["rscores"]) if r["rscores"] else 0
-                      print(f"  {r['rnd']:<5} {r['A_g']:>8.4f} {r['state_wall']:>9.2f}s "
-                            f"{r['sub_wall']:>8.2f}s {avg:>9.3f} {r['sub_errs']:>7}")
+              # 1. requests_log.csv  (every single HTTP call)
+              with open(f"{OUT}/requests_log.csv", "w", newline="") as f:
+                  w = csv.DictWriter(f, fieldnames=[
+                      "timestamp","phase","round","player",
+                      "endpoint","method","status","latency_ms","ok"
+                  ])
+                  w.writeheader(); w.writerows(req_log)
 
-                  print()
-                  print("  Strategy groups (10 players each):")
-                  for g, name in enumerate(STRATEGY_NAMES):
-                      print(f"    Group {g}: {name}")
+              # 2. join_results.csv  (per-player join outcome)
+              with open(f"{OUT}/join_results.csv", "w", newline="") as f:
+                  w = csv.DictWriter(f, fieldnames=[
+                      "player_index","player_name","strategy_group","strategy_name",
+                      "player_id","status_code","latency_ms","success","error"
+                  ])
+                  w.writeheader(); w.writerows(join_rows)
 
-                  print("\n  PASS – 50-player simulation completed successfully!")
+              # 3. rounds_timing.csv  (per-round breakdown)
+              rnd_fields = [
+                  "round","g_realized","A_g","total_round_wall_s",
+                  "state_wall_s","state_min_ms","state_avg_ms","state_p95_ms","state_max_ms","state_errors",
+                  "submit_wall_s","submit_min_ms","submit_avg_ms","submit_p95_ms","submit_max_ms","submit_errors",
+                  "resolve_ms","avg_round_score","min_round_score","max_round_score",
+              ]
+              with open(f"{OUT}/rounds_timing.csv", "w", newline="") as f:
+                  w = csv.DictWriter(f, fieldnames=rnd_fields, extrasaction="ignore")
+                  w.writeheader(); w.writerows(round_rows)
+
+              # 4. final_scores.csv
+              with open(f"{OUT}/final_scores.csv", "w", newline="") as f:
+                  w = csv.DictWriter(f, fieldnames=[
+                      "rank","player_name","strategy_group","strategy_name",
+                      "total_score","final_share"
+                  ], extrasaction="ignore")
+                  w.writeheader(); w.writerows(final_rows)
+
+              # 5. simulation_report.json  (machine-readable, everything)
+              strat_scores = {i: [] for i in range(5)}
+              for p in final_rows:
+                  g = p["strategy_group"]
+                  if g >= 0: strat_scores[g].append(p["total_score"])
+              strat_analysis = {}
+              for g, scores in strat_scores.items():
+                  if scores:
+                      strat_analysis[STRAT[g]] = {
+                          "n": len(scores),
+                          "avg": round(sum(scores)/len(scores), 3),
+                          "min": round(min(scores), 3),
+                          "max": round(max(scores), 3),
+                      }
+
+              report = {
+                  "meta": {
+                      "sim_start_utc":  sim_start.isoformat(),
+                      "base_url":       BASE,
+                      "n_players":      N_PLAYERS,
+                      "n_rounds":       N_ROUNDS,
+                      "total_time_s":   round(total_time, 2),
+                      "players_joined": len(players),
+                      "join_errors":    sum(1 for j in join_rows if not j["success"]),
+                      "total_requests": len(req_log),
+                      "total_errors":   sum(1 for r in req_log if not r["ok"]),
+                  },
+                  "join_phase": {
+                      "wall_s": round(join_wall, 3),
+                      "latency": lat_stats(join_lats),
+                  },
+                  "overall_latency": {
+                      "state_GET":    lat_stats(all_state_lats),
+                      "submit_POST":  lat_stats(all_sub_lats),
+                  },
+                  "rounds": [
+                      {k: v for k, v in r.items() if not k.startswith("_")}
+                      for r in round_rows
+                  ],
+                  "strategy_analysis": strat_analysis,
+                  "final_scores": final_rows,
+                  "slowest_requests": sorted(
+                      req_log, key=lambda r: r["latency_ms"], reverse=True
+                  )[:20],
+              }
+              with open(f"{OUT}/simulation_report.json", "w") as f:
+                  json.dump(report, f, indent=2)
+
+              # 6. simulation_summary.txt  (human-readable, main artifact)
+              slowest_rnd = max(round_rows, key=lambda r: r["total_round_wall_s"])
+              slowest_sub = max(round_rows, key=lambda r: r["submit_wall_s"])
+
+              lines = []
+              def L(s=""): lines.append(s)
+
+              L("=" * 66)
+              L("50-PLAYER CONCURRENT SIMULATION – SUMMARY REPORT")
+              L("=" * 66)
+              L(f"Date (UTC)     : {sim_start.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+              L(f"Base URL       : {BASE}")
+              L(f"Players        : {len(players)}/{N_PLAYERS} joined")
+              L(f"Rounds         : {N_ROUNDS}")
+              L(f"Total time     : {total_time:.1f}s")
+              L(f"Total requests : {len(req_log)}")
+              L(f"Total errors   : {sum(1 for r in req_log if not r['ok'])}")
+              L()
+              L("─" * 66)
+              L("JOIN PHASE (50 players, concurrent)")
+              L("─" * 66)
+              L(f"  Wall time  : {join_wall:.2f}s")
+              L(f"  Successful : {len(players)}/{N_PLAYERS}  |  Errors: {join_errs}")
+              L(lat_line(lat_stats(join_lats), "  Latency"))
+              L()
+              L("─" * 66)
+              L("ROUND-BY-ROUND TIMING")
+              L("─" * 66)
+              L(f"  {'Rnd':<4} {'Total':>7} {'StateWall':>10} {'SubWall':>8} "
+                f"{'Resolve':>8} {'A_g':>7} {'AvgScore':>9} {'Err':>4}")
+              L(f"  {'─'*4} {'─'*7} {'─'*10} {'─'*8} {'─'*8} {'─'*7} {'─'*9} {'─'*4}")
+              for r in round_rows:
+                  errs = r["state_errors"] + r["submit_errors"]
+                  flag = " <-- SLOWEST" if r["round"] == slowest_rnd["round"] else ""
+                  L(f"  {r['round']:<4} {r['total_round_wall_s']:>6.2f}s "
+                    f"{r['state_wall_s']:>9.2f}s {r['submit_wall_s']:>7.2f}s "
+                    f"{r['resolve_ms']:>7.0f}ms {r['A_g']:>7.4f} "
+                    f"{r['avg_round_score']:>9.3f} {errs:>4}{flag}")
+              L()
+              L("─" * 66)
+              L("LATENCY DETAILS (state GET – per round)")
+              L("─" * 66)
+              L(f"  {'Rnd':<4} {'min':>7} {'avg':>7} {'p95':>7} {'max':>7}")
+              L(f"  {'─'*4} {'─'*7} {'─'*7} {'─'*7} {'─'*7}")
+              for r in round_rows:
+                  s = lat_stats(r["_state_lats"])
+                  L(f"  {r['round']:<4} {s['min']:>6.0f}ms {s['avg']:>6.0f}ms "
+                    f"{s['p95']:>6.0f}ms {s['max']:>6.0f}ms")
+              L()
+              L("─" * 66)
+              L("LATENCY DETAILS (submit POST – per round)")
+              L("─" * 66)
+              L(f"  {'Rnd':<4} {'min':>7} {'avg':>7} {'p95':>7} {'max':>7}")
+              L(f"  {'─'*4} {'─'*7} {'─'*7} {'─'*7} {'─'*7}")
+              for r in round_rows:
+                  s = lat_stats(r["_sub_lats"])
+                  L(f"  {r['round']:<4} {s['min']:>6.0f}ms {s['avg']:>6.0f}ms "
+                    f"{s['p95']:>6.0f}ms {s['max']:>6.0f}ms")
+              L()
+              L("─" * 66)
+              L("LATENCY SUMMARY (all rounds combined)")
+              L("─" * 66)
+              L(lat_line(lat_stats(all_state_lats),  "  GET  /state"))
+              L(lat_line(lat_stats(all_sub_lats),    "  POST /submit"))
+              L()
+              L("─" * 66)
+              L("BOTTLENECK ANALYSIS")
+              L("─" * 66)
+              L(f"  Slowest overall round : Round {slowest_rnd['round']}  "
+                f"({slowest_rnd['total_round_wall_s']:.2f}s total)")
+              L(f"  Slowest submit phase  : Round {slowest_sub['round']}  "
+                f"({slowest_sub['submit_wall_s']:.2f}s wall)")
+              L()
+              state_all  = lat_stats(all_state_lats)
+              submit_all = lat_stats(all_sub_lats)
+              bottleneck = "submit POST" if submit_all["avg"] > state_all["avg"] else "state GET"
+              L(f"  Avg GET /state  : {state_all['avg']:.0f}ms")
+              L(f"  Avg POST /submit: {submit_all['avg']:.0f}ms")
+              L(f"  Primary bottleneck: {bottleneck}")
+              L()
+              L("─" * 66)
+              L("TOP 15 SLOWEST REQUESTS")
+              L("─" * 66)
+              L(f"  {'#':<3} {'Phase':<12} {'Rnd':<4} {'Method':<6} "
+                f"{'Latency':>9} {'Status':>7}  Endpoint")
+              L(f"  {'─'*3} {'─'*12} {'─'*4} {'─'*6} {'─'*9} {'─'*7}  {'─'*30}")
+              for i, req in enumerate(
+                  sorted(req_log, key=lambda r: r["latency_ms"], reverse=True)[:15], 1
+              ):
+                  ep = req["endpoint"]
+                  if len(ep) > 35: ep = "..." + ep[-32:]
+                  L(f"  {i:<3} {req['phase']:<12} {str(req['round']):<4} "
+                    f"{req['method']:<6} {req['latency_ms']:>8.0f}ms "
+                    f"{req['status']:>7}  {ep}")
+              L()
+              L("─" * 66)
+              L("FINAL LEADERBOARD (all 50 players)")
+              L("─" * 66)
+              L(f"  {'Rank':<5} {'Name':<16} {'Strategy':<22} {'Score':>10} {'Share':>8}")
+              L(f"  {'─'*5} {'─'*16} {'─'*22} {'─'*10} {'─'*8}")
+              for p in final_rows:
+                  tag = " <-- WINNER" if p["rank"] == 1 else ""
+                  L(f"  {p['rank']:<5} {p['player_name']:<16} {p['strategy_name']:<22} "
+                    f"{p['total_score']:>10.3f} {p['final_share']:>8.4f}{tag}")
+              L()
+              L("─" * 66)
+              L("STRATEGY GROUP ANALYSIS (avg cumulative score)")
+              L("─" * 66)
+              for name, s in strat_analysis.items():
+                  L(f"  {name:<24}: avg={s['avg']:>8.3f}  "
+                    f"min={s['min']:>8.3f}  max={s['max']:>8.3f}  n={s['n']}")
+              L()
+              L("=" * 66)
+              L("ARTIFACT FILES")
+              L("=" * 66)
+              L("  simulation_summary.txt  – this report (human-readable)")
+              L("  requests_log.csv        – every HTTP request with timestamp & latency")
+              L("  join_results.csv        – per-player join outcome")
+              L("  rounds_timing.csv       – per-round wall times, latency stats, scores")
+              L("  final_scores.csv        – full leaderboard with strategy labels")
+              L("  simulation_report.json  – machine-readable, all data combined")
+              L()
+              L("=" * 66)
+              L("PASS – Simulation completed successfully.")
+              L("=" * 66)
+
+              report_text = "\n".join(lines)
+              with open(f"{OUT}/simulation_summary.txt", "w") as f:
+                  f.write(report_text + "\n")
+
+              print("\n\n" + report_text)
+              print(f"\n  Artifacts written to: {OUT}/")
+              print("  PASS – 50-player simulation completed!")
 
           asyncio.run(main())
           PYEOF
+
+      # ── Upload all result files as a GitHub artifact ────────────────────────
+      - name: Upload simulation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulation-results-${{ github.run_id }}
+          path: results/
+          retention-days: 30

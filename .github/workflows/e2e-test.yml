@@ -10,7 +10,7 @@ on:
         required: false
 
 env:
-  BASE_URL: ${{ inputs.render_url || secrets.RENDER_URL || 'https://simplegreentechtransitiongame.onrender.com' }}
+  BASE_URL: ${{ inputs.render_url || secrets.RENDER_URL || 'https://simplegreentechtransition-1.onrender.com' }}
 
 jobs:
   e2e:
