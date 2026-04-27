@@ -27,14 +27,26 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      # ── 1. Is frontend loading correctly? ──────────────────────────────────────
+      # Render free tier sleeps after inactivity – wake it up before testing
+      - name: "Wake up Render (cold-start)"
+        run: |
+          echo "Pinging $BASE_URL until it responds with 200..."
+          for i in 1 2 3 4 5 6; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 40 "$BASE_URL/")
+            echo "  Attempt $i: HTTP $STATUS"
+            [ "$STATUS" = "200" ] && { echo "  Server is up."; break; }
+            [ "$i" = "6" ] && { echo "FAIL: server did not wake up"; exit 1; }
+            sleep 10
+          done
+
+      # ── 1. Frontend loads ────────────────────────────────────────────────────
       - name: "Check: frontend loads (HTTP 200)"
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/")
           echo "HTTP status: $STATUS"
           [ "$STATUS" = "200" ] || { echo "FAIL: expected 200, got $STATUS"; exit 1; }
 
-      # ── 2. API – full game play ─────────────────────────────────────────────
+      # ── 2. Full game via API ─────────────────────────────────────────────────
       - name: "Play a full game via API"
         env:
           BASE_URL: ${{ env.BASE_URL }}
@@ -46,14 +58,36 @@ jobs:
           s    = requests.Session()
           s.headers["Content-Type"] = "application/json"
 
-          def ok(r, label=""):
+          def safe_json(r, label=""):
+              """Parse JSON; print helpful debug info and exit on any failure."""
+              text = r.text.strip() if r.text else ""
               if not r.ok:
-                  print(f"FAIL [{label}] {r.status_code}: {r.text}", file=sys.stderr)
+                  print(f"FAIL [{label}] HTTP {r.status_code}", file=sys.stderr)
+                  print(f"  Body: {text[:400]}", file=sys.stderr)
                   sys.exit(1)
-              data = r.json()
+              if not text:
+                  print(f"FAIL [{label}] HTTP {r.status_code} – empty response body",
+                        file=sys.stderr)
+                  print(f"  Content-Type: {r.headers.get('Content-Type','?')}",
+                        file=sys.stderr)
+                  sys.exit(1)
+              try:
+                  return r.json()
+              except Exception as e:
+                  print(f"FAIL [{label}] JSON parse error: {e}", file=sys.stderr)
+                  print(f"  HTTP {r.status_code}  Body: {text[:400]}", file=sys.stderr)
+                  sys.exit(1)
+
+          def ok(r, label=""):
+              data = safe_json(r, label)
               print(f"  OK  [{label}] {json.dumps(data)[:200]}")
               return data
 
+          def get_json(url, label="", **kwargs):
+              r = s.get(url, **kwargs)
+              return safe_json(r, label)
+
+          # ── 1. Create room ──────────────────────────────────────────────────
           print("=== 1. Create room ===")
           d = ok(s.post(f"{BASE}/api/rooms", json={
               "g_min": 0.2, "g_max": 0.8, "num_rounds": 3,
@@ -65,77 +99,85 @@ jobs:
           admin_token = d["admin_token"]
           print(f"  room_id={room_id}  admin_token={admin_token}")
 
+          # ── 2. Join 2 players ───────────────────────────────────────────────
           print("=== 2. Join 2 players ===")
-          p1 = ok(s.post(f"{BASE}/api/rooms/{room_id}/join", json={"player_name": "Alice"}), "join Alice")
-          p2 = ok(s.post(f"{BASE}/api/rooms/{room_id}/join", json={"player_name": "Bob"}),   "join Bob")
-          pid1, pid2 = p1["player_id"], p2["player_id"]
+          p1   = ok(s.post(f"{BASE}/api/rooms/{room_id}/join",
+                           json={"player_name": "Alice"}), "join Alice")
+          p2   = ok(s.post(f"{BASE}/api/rooms/{room_id}/join",
+                           json={"player_name": "Bob"}), "join Bob")
+          pid1 = p1["player_id"]
+          pid2 = p2["player_id"]
 
+          # ── 3. Start game ───────────────────────────────────────────────────
           print("=== 3. Start game ===")
-          ok(s.post(f"{BASE}/api/rooms/{room_id}/start", json={"admin_token": admin_token}), "start")
+          ok(s.post(f"{BASE}/api/rooms/{room_id}/start",
+                    json={"admin_token": admin_token}), "start")
 
+          # ── 4. Verify playing state ─────────────────────────────────────────
           print("=== 4. Check state after start ===")
-          state = ok(s.get(f"{BASE}/api/rooms/{room_id}/state",
-                          params={"admin_token": admin_token}), "state-after-start")
-          assert state["status"] == "playing", f"Expected 'playing', got {state['status']}"
+          state = get_json(f"{BASE}/api/rooms/{room_id}/state",
+                           label="state-after-start",
+                           params={"admin_token": admin_token})
+          assert state["status"] == "playing", \
+              f"Expected 'playing', got {state['status']}"
           num_rounds = state["num_rounds"]
           print(f"  num_rounds={num_rounds}")
 
-          # ── Play each round ──────────────────────────────────────────────────
+          # ── 5. Play all rounds ──────────────────────────────────────────────
           for rnd in range(1, num_rounds + 1):
               print(f"\n=== Round {rnd}/{num_rounds} ===")
 
-              state = s.get(f"{BASE}/api/rooms/{room_id}/state",
-                            params={"admin_token": admin_token}).json()
+              state  = get_json(f"{BASE}/api/rooms/{room_id}/state",
+                                label=f"r{rnd}-state",
+                                params={"admin_token": admin_token})
               share1 = state["players"][pid1]["share"]
               share2 = state["players"][pid2]["share"]
               print(f"  Alice share={share1:.4f}  Bob share={share2:.4f}")
 
-              # Alice invests 50 % of her share, Bob invests 100 %
-              inv1 = round(share1 * 0.5,  4)
-              inv2 = round(share2 * 1.0,  4)
-
               ok(s.post(f"{BASE}/api/rooms/{room_id}/submit",
-                        json={"player_id": pid1, "investment": inv1}), f"r{rnd}-submit-Alice")
+                        json={"player_id": pid1, "investment": round(share1 * 0.5, 4)}),
+                 f"r{rnd}-submit-Alice")
               ok(s.post(f"{BASE}/api/rooms/{room_id}/submit",
-                        json={"player_id": pid2, "investment": inv2}), f"r{rnd}-submit-Bob")
+                        json={"player_id": pid2, "investment": round(share2 * 1.0, 4)}),
+                 f"r{rnd}-submit-Bob")
 
               ok(s.post(f"{BASE}/api/rooms/{room_id}/resolve",
                         json={"admin_token": admin_token}), f"r{rnd}-resolve")
 
-              state = s.get(f"{BASE}/api/rooms/{room_id}/state",
-                            params={"admin_token": admin_token}).json()
-              assert state["status"] == "round_results", f"Expected round_results, got {state['status']}"
+              state = get_json(f"{BASE}/api/rooms/{room_id}/state",
+                               label=f"r{rnd}-results",
+                               params={"admin_token": admin_token})
+              assert state["status"] == "round_results", \
+                  f"Expected round_results, got {state['status']}"
 
               last = state["history"][-1]
               print(f"  A_g={last['A_g']:.4f}")
               for pid, r in last["results"].items():
-                  name = r["name"]
-                  print(f"    {name}: score={r['score']:.3f}  s_new={r['s_new']:.4f}")
+                  print(f"    {r['name']}: score={r['score']:.3f}  s_new={r['s_new']:.4f}")
 
-              if rnd < num_rounds:
-                  ok(s.post(f"{BASE}/api/rooms/{room_id}/next_round",
-                            json={"admin_token": admin_token}), f"r{rnd}-next_round")
-              else:
-                  # last round – next_round should move to 'finished'
-                  ok(s.post(f"{BASE}/api/rooms/{room_id}/next_round",
-                            json={"admin_token": admin_token}), f"r{rnd}-next_round-finish")
+              ok(s.post(f"{BASE}/api/rooms/{room_id}/next_round",
+                        json={"admin_token": admin_token}),
+                 f"r{rnd}-next_round")
 
+          # ── 6. Verify finished ──────────────────────────────────────────────
           print("\n=== 5. Verify final state ===")
-          state = ok(s.get(f"{BASE}/api/rooms/{room_id}/state",
-                           params={"admin_token": admin_token}), "final-state")
-          assert state["status"] == "finished", f"Expected 'finished', got {state['status']}"
+          state = get_json(f"{BASE}/api/rooms/{room_id}/state",
+                           label="final-state",
+                           params={"admin_token": admin_token})
+          assert state["status"] == "finished", \
+              f"Expected 'finished', got {state['status']}"
 
           scores = {pid: p["total_score"] for pid, p in state["players"].items()}
-          print(f"  Final scores: {scores}")
           winner = max(scores, key=scores.get)
-          print(f"  Winner: {state['players'][winner]['name']}  ({scores[winner]:.3f})")
-
-          print("\n✅ All checks passed – game ran successfully on Render!")
+          print(f"  Winner: {state['players'][winner]['name']}  "
+                f"({scores[winner]:.3f})")
+          print("\n  PASS – game ran successfully on Render!")
           PYEOF
 
-      # ── 3. API health check ──────────────────────────────────────
+      # ── 3. Unknown room returns 404 ──────────────────────────────────────────
       - name: "Check: unknown room returns 404"
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/rooms/ZZZZZZ/state")
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$BASE_URL/api/rooms/ZZZZZZ/state")
           echo "HTTP status for unknown room: $STATUS"
           [ "$STATUS" = "404" ] || { echo "FAIL: expected 404, got $STATUS"; exit 1; }

@@ -28,14 +28,25 @@ jobs:
       - name: Create results directory
         run: mkdir -p results
 
-      # Render free tier may be sleeping – wake it up first
+      # Render free tier may be sleeping – wake frontend AND verify the API responds
       - name: "Wake up Render (cold-start)"
         run: |
-          echo "Pinging $BASE_URL ..."
-          for i in 1 2 3 4 5; do
+          echo "Step 1: wake frontend..."
+          for i in 1 2 3 4 5 6; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 40 "$BASE_URL/")
             echo "  Attempt $i: HTTP $STATUS"
-            [ "$STATUS" = "200" ] && { echo "  Server is up."; break; }
+            [ "$STATUS" = "200" ] && break
+            [ "$i" = "6" ] && { echo "FAIL: frontend never returned 200"; exit 1; }
+            sleep 10
+          done
+          echo "Step 2: verify API is responding (POST /api/rooms)..."
+          for i in 1 2 3; do
+            BODY=$(curl -s --max-time 15 -X POST "$BASE_URL/api/rooms" \
+              -H "Content-Type: application/json" \
+              -d '{"g_min":0.1,"g_max":0.9,"num_rounds":1,"alpha":0,"beta":0,"pi_p":4,"pi_r":3,"pi_q":5,"c_u":10,"c_o":1}')
+            echo "  API attempt $i: $BODY"
+            echo "$BODY" | grep -q "room_id" && { echo "  API is ready."; break; }
+            [ "$i" = "3" ] && { echo "FAIL: API not ready after 3 attempts"; exit 1; }
             sleep 8
           done
 
@@ -90,31 +101,61 @@ jobs:
               })
 
           # ── HTTP helpers ───────────────────────────────────────────────────
+          def _parse(text, status):
+              """Parse response text into a dict. Never returns None."""
+              raw = text.strip() if text else ""
+              if not raw:
+                  return {"_err": "empty body", "_status": status}
+              try:
+                  parsed = json.loads(raw)
+                  if parsed is None:
+                      return {"_err": "server returned null", "_raw": raw[:200]}
+                  if not isinstance(parsed, dict):
+                      return {"_err": f"not a dict: {type(parsed).__name__}", "_raw": raw[:200]}
+                  return parsed
+              except json.JSONDecodeError as e:
+                  return {"_err": f"JSON parse: {e}", "_raw": raw[:200]}
+
           async def post(sess, path, phase="", rnd=None, player="", **kw):
               t0 = time.perf_counter()
               try:
                   async with sess.post(BASE + path, **kw) as r:
-                      data = await r.json(content_type=None)
+                      text = await r.text()
                       lat  = time.perf_counter() - t0
+                      data = _parse(text, r.status)
                       log_req(phase, rnd, player, path, "POST", r.status, lat)
                       return data, lat, r.status
               except Exception as e:
                   lat = time.perf_counter() - t0
                   log_req(phase, rnd, player, path, "POST", 0, lat)
-                  return {"error": str(e)}, lat, 0
+                  return {"_err": str(e)}, lat, 0
 
           async def get(sess, path, phase="", rnd=None, player="", **kw):
               t0 = time.perf_counter()
               try:
                   async with sess.get(BASE + path, **kw) as r:
-                      data = await r.json(content_type=None)
+                      text = await r.text()
                       lat  = time.perf_counter() - t0
+                      data = _parse(text, r.status)
                       log_req(phase, rnd, player, path, "GET", r.status, lat)
                       return data, lat, r.status
               except Exception as e:
                   lat = time.perf_counter() - t0
                   log_req(phase, rnd, player, path, "GET", 0, lat)
-                  return {"error": str(e)}, lat, 0
+                  return {"_err": str(e)}, lat, 0
+
+          def require(d, *keys, label=""):
+              """Validate dict has required keys; print debug info and exit if not."""
+              if not isinstance(d, dict):
+                  print(f"  FATAL [{label}]: response is not a dict: {d}", flush=True)
+                  sys.exit(1)
+              if "_err" in d:
+                  print(f"  FATAL [{label}]: {d}", flush=True)
+                  sys.exit(1)
+              for k in keys:
+                  if k not in d:
+                      print(f"  FATAL [{label}]: missing key '{k}' in {d}", flush=True)
+                      sys.exit(1)
 
           # ── Statistics helpers ─────────────────────────────────────────────
           def pct(lst, p):
@@ -163,7 +204,10 @@ jobs:
                       "pi_p": 4.0,  "pi_r": 3.0, "pi_q": 5.0,
                       "c_u":  10.0, "c_o":  1.0,
                   })
-                  if st != 200: print(f"  FATAL: {d}"); sys.exit(1)
+                  if st != 200:
+                      print(f"  FATAL create_room: HTTP {st}  body={d}", flush=True)
+                      sys.exit(1)
+                  require(d, "room_id", "admin_token", label="create_room")
                   room_id, admin_token = d["room_id"], d["admin_token"]
                   print(f"  room_id={room_id}  latency={lat*1000:.0f}ms")
 
@@ -204,7 +248,9 @@ jobs:
                   print(f"  Wall time  : {join_wall:.2f}s")
                   print(f"  Successful : {len(players)}/{N_PLAYERS}  |  Errors: {join_errs}")
                   print(lat_line(js, "JOIN latency"))
-                  if len(players) < 2: print("FATAL: need at least 2 players"); sys.exit(1)
+                  if len(players) < 2:
+                      print("FATAL: need at least 2 players", flush=True)
+                      sys.exit(1)
 
                   # ── Phase 3: Start game ───────────────────────────────────
                   print("\n" + "=" * 66)
@@ -212,8 +258,10 @@ jobs:
                   d, lat, st = await post(sess, f"/api/rooms/{room_id}/start",
                                           phase="setup",
                                           json={"admin_token": admin_token})
-                  print(f"  status={d.get('status','?') if d else st}  latency={lat*1000:.0f}ms")
-                  if st != 200: print(f"  FATAL: {d}"); sys.exit(1)
+                  if st != 200:
+                      print(f"  FATAL start: HTTP {st}  body={d}", flush=True)
+                      sys.exit(1)
+                  print(f"  status={d.get('status','?')}  latency={lat*1000:.0f}ms")
 
                   # ── Phase 4: Play rounds ──────────────────────────────────
                   pid_list = [players[i]["player_id"] for i in sorted(players)]
@@ -264,7 +312,9 @@ jobs:
                                                       phase="resolve", rnd=rnd,
                                                       json={"admin_token": admin_token})
                       print(f"  POST /resolve: {resolve_lat*1000:.0f}ms  status={st}")
-                      if st != 200: print(f"  FATAL: {d}"); sys.exit(1)
+                      if st != 200:
+                          print(f"  FATAL resolve r{rnd}: HTTP {st}  body={d}", flush=True)
+                          sys.exit(1)
 
                       # 4e. Fetch round results
                       d, _, _ = await get(sess, f"/api/rooms/{room_id}/state",
