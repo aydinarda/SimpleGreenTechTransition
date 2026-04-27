@@ -52,6 +52,21 @@ class SubmitRequest(BaseModel):
 class AdminRequest(BaseModel):
     admin_token: str
 
+class NextRoundRequest(BaseModel):
+    admin_token: str
+    # optional per-round param overrides
+    g_min: Optional[float] = None
+    g_max: Optional[float] = None
+    alpha: Optional[float] = None
+    beta: Optional[float] = None
+    pi_p: Optional[float] = None
+    pi_r: Optional[float] = None
+    pi_q: Optional[float] = None
+    c_u: Optional[float] = None
+    c_o: Optional[float] = None
+    major_share: Optional[float] = None
+    major_player_frac: Optional[float] = None
+
 
 # ─── Core game logic ──────────────────────────────────────────────────────────
 
@@ -293,11 +308,22 @@ async def resolve_round(room_id: str, req: AdminRequest):
 
 
 @app.post("/api/rooms/{room_id}/next_round")
-def next_round(room_id: str, req: AdminRequest):
+def next_round(room_id: str, req: NextRoundRequest):
     room = rooms.get(room_id)
     if not room: raise HTTPException(404, "Room not found")
     if req.admin_token != room["admin_token"]: raise HTTPException(403, "Not admin")
     if room["status"] != "round_results": raise HTTPException(400, "Not in round_results phase")
+
+    # Apply optional param overrides
+    _UPDATABLE = ["g_min", "g_max", "alpha", "beta", "pi_p", "pi_r", "pi_q", "c_u", "c_o",
+                  "major_share", "major_player_frac"]
+    market_changed = False
+    for key in _UPDATABLE:
+        val = getattr(req, key)
+        if val is not None:
+            if key in ("major_share", "major_player_frac"):
+                market_changed = True
+            room["params"][key] = val
 
     room["current_round"] += 1
     room["submissions"] = {}
@@ -305,8 +331,24 @@ def next_round(room_id: str, req: AdminRequest):
     if room["current_round"] > room["params"]["num_rounds"]:
         room["status"] = "finished"
     else:
+        # Regenerate market if structure params changed
+        if market_changed:
+            n = len(room["players"])
+            new_shares, new_is_major = _generate_market(
+                n, room["params"]["major_share"], room["params"]["major_player_frac"]
+            )
+            pids = list(room["players"].keys())
+            room["initial_shares"]   = {pid: new_shares[i]   for i, pid in enumerate(pids)}
+            room["initial_is_major"] = {pid: new_is_major[i] for i, pid in enumerate(pids)}
+            for pid in pids:
+                room["players"][pid]["is_major"] = room["initial_is_major"][pid]
+
+        # Reset shares to initial and re-draw g for this round
         for pid, share in room["initial_shares"].items():
             room["players"][pid]["share"] = share
+        room["g_realized"] = float(np.random.uniform(
+            room["params"]["g_min"], room["params"]["g_max"]
+        ))
         room["status"] = "playing"
 
     return {"status": room["status"], "round": room["current_round"]}
