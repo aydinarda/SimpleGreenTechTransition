@@ -1,0 +1,134 @@
+name: k6 Concurrent Load Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Backend URL (leave blank for default)"
+        required: false
+        default: ""
+
+env:
+  BASE_URL: ${{ inputs.base_url || secrets.RENDER_URL || 'https://simplegreentechtransition.onrender.com' }}
+
+jobs:
+  k6:
+    name: Concurrent scenarios – join / submit / full-game
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Install k6 ────────────────────────────────────────────────────────────
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring \
+            --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq
+          sudo apt-get install -y k6
+          k6 version
+
+      # ── Wake up Render backend (free tier sleeps after inactivity) ────────────
+      - name: Wake up backend
+        run: |
+          echo "Pinging backend until it responds..."
+          for i in 1 2 3 4 5 6; do
+            BODY=$(curl -s --max-time 40 -X POST "$BASE_URL/api/rooms" \
+              -H "Content-Type: application/json" \
+              -d '{"g_min":0.1,"g_max":0.9,"num_rounds":1,"alpha":0,"beta":0,"pi_p":4,"pi_r":3,"pi_q":5,"c_u":10,"c_o":1}')
+            echo "  Attempt $i: $BODY"
+            echo "$BODY" | grep -q "room_id" && { echo "  Backend is up."; break; }
+            [ "$i" = "6" ] && { echo "FAIL: backend did not wake"; exit 1; }
+            sleep 10
+          done
+
+      # ── Run k6 ───────────────────────────────────────────────────────────────
+      # Exit code 99  = threshold violation (test continues, artifacts uploaded)
+      # Exit code 0   = all thresholds passed
+      - name: Run k6 load tests
+        id: k6
+        run: |
+          k6 run \
+            --env BASE_URL="$BASE_URL" \
+            --summary-export=k6-summary.json \
+            --out json=k6-results.ndjson \
+            k6/game_load_test.js
+        # Do not fail the step here — we want artifacts even on threshold failure
+        continue-on-error: true
+
+      # ── Human-readable summary in the Actions log ─────────────────────────────
+      - name: Print threshold results
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+
+          try:
+              with open("k6-summary.json") as f:
+                  s = json.load(f)
+          except Exception as e:
+              print(f"Could not read k6-summary.json: {e}")
+              sys.exit(0)
+
+          metrics    = s.get("metrics",    {})
+          thresholds = s.get("thresholds", {})
+
+          print("\n══════════════════════════════════════════")
+          print("  k6 Threshold Results")
+          print("══════════════════════════════════════════")
+          all_ok = True
+          for name, t in sorted(thresholds.items()):
+              ok     = t.get("ok", False)
+              status = "PASS ✓" if ok else "FAIL ✗"
+              if not ok:
+                  all_ok = False
+              print(f"  {status}  {name}")
+
+          print("\n══════════════════════════════════════════")
+          print("  Key Metrics")
+          print("══════════════════════════════════════════")
+
+          def stat(name, unit="ms"):
+              m = metrics.get(name, {})
+              v = m.get("values", {})
+              p95 = v.get("p(95)", v.get("avg", "—"))
+              avg = v.get("avg", "—")
+              return f"avg={avg:.1f}{unit}  p95={p95:.1f}{unit}" if isinstance(p95, float) else "—"
+
+          print(f"  join_latency        {stat('join_latency')}")
+          print(f"  submit_latency      {stat('submit_latency')}")
+
+          errs = metrics.get("game_errors", {}).get("values", {}).get("count", 0)
+          reqs = metrics.get("http_reqs",   {}).get("values", {}).get("count", 0)
+          fail = metrics.get("http_req_failed", {}).get("values", {}).get("rate", 0)
+          print(f"  game_errors         {int(errs)}")
+          print(f"  http_reqs total     {int(reqs)}")
+          print(f"  http_req_failed     {fail*100:.2f}%")
+          print("══════════════════════════════════════════\n")
+
+          if not all_ok:
+              print("One or more thresholds FAILED.")
+              sys.exit(1)
+          EOF
+
+      # ── Fail the job if k6 itself failed (exit 99 = threshold violation) ──────
+      - name: Propagate k6 exit code
+        if: steps.k6.outcome == 'failure'
+        run: exit 1
+
+      # ── Upload artifacts ──────────────────────────────────────────────────────
+      - name: Upload k6 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-results-${{ github.run_id }}
+          path: |
+            k6-summary.json
+            k6-results.ndjson
+          retention-days: 30
