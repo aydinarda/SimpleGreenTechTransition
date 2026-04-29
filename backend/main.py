@@ -187,7 +187,8 @@ def compute_round(room: dict) -> tuple:
         r["reward_2nd"]   = pi_r * second
         r["reward_steal"] = pi_q * r["gained"]
         r["penalty"]      = -c_u * r["lost"] - c_o * r["overage"]
-        r["score"]        = r["reward_own"] + r["reward_2nd"] + r["reward_steal"] + r["penalty"]
+        r["score"]            = r["reward_own"] + r["reward_2nd"] + r["reward_steal"] + r["penalty"]
+        r["score_normalized"] = r["score"] / r["s_i"] if r["s_i"] > 1e-9 else 0.0
 
     return results, A_g
 
@@ -297,7 +298,7 @@ async def resolve_round(room_id: str, req: AdminRequest):
 
     for pid, r in results.items():
         room["players"][pid]["share"] = r["s_new"]
-        room["players"][pid]["total_score"] += r["score"]
+        room["players"][pid]["total_score"] += r["score_normalized"]
 
     room["history"].append({
         "round": room["current_round"],
