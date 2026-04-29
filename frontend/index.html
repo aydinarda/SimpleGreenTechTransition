@@ -297,15 +297,15 @@ tr.me td{background:#e8f5e9;font-weight:600}
       <thead>
         <tr>
           <th>Player</th>
-          <th>s<sub>i</sub></th>
-          <th>a<sub>i</sub></th>
-          <th>g·s<sub>i</sub></th>
+          <th>Initial Share</th>
+          <th>Investment</th>
+          <th>Green Threshold</th>
           <th>Position</th>
-          <th>u / w</th>
-          <th>s̃<sub>i</sub></th>
-          <th>π<sub>p</sub>·own</th>
-          <th>π<sub>r</sub>·2nd</th>
-          <th>π<sub>q</sub>·w</th>
+          <th>Lost / Gained</th>
+          <th>New Share</th>
+          <th>reward<sub>green customer</sub>·own</th>
+          <th>reward<sub>residual green customer</sub>·2nd</th>
+          <th>reward<sub>stolen green customer</sub>·w</th>
           <th>Penalty</th>
           <th>Score</th>
         </tr>
@@ -753,11 +753,11 @@ function renderResults(d, hist) {
 
   const p = d.params || {};
   const A_g = hist.A_g ?? 0;
-  const gStr = d.g_realized != null ? `g = ${f3(d.g_realized)}` : `g ~ U(${f3(d.g_min)}, ${f3(d.g_max)})`;
+  const gStr = d.g_realized != null ? `realized green demand = ${f3(d.g_realized)}` : `green demand distribution ~ U(${f3(d.g_min)}, ${f3(d.g_max)})`;
   $('res-meta').innerHTML =
-    `${gStr} &nbsp;|&nbsp; A<sub>g</sub> = ${f3(A_g)} &nbsp;|&nbsp; `
-    + `π<sub>p</sub>=${p.pi_p ?? 4}, π<sub>r</sub>=${p.pi_r ?? 3}, π<sub>q</sub>=${p.pi_q ?? 5}, `
-    + `c<sub>u</sub>=${p.c_u ?? 10}, c<sub>o</sub>=${p.c_o ?? 1}`;
+    `${gStr} &nbsp;|&nbsp; Total Green Served = ${f3(A_g)} &nbsp;|&nbsp; ` 
+    + `<br> reward<sub>green customer</sub> = ${p.pi_p ?? 4}, reward<sub>residual green customer</sub> = ${p.pi_r ?? 3}, reward<sub>stolen green customer</sub> = ${p.pi_q ?? 5}, `
+    + `<br> underinvestment penalty = ${p.c_u ?? 10}, overinvestment penalty = ${p.c_o ?? 1}`;
 
   const rows = Object.entries(hist.results)
     .sort((a, b) => b[1].s_new - a[1].s_new);
