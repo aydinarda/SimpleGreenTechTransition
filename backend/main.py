@@ -333,9 +333,6 @@ def next_round(room_id: str, req: NextRoundRequest):
     if room["current_round"] > room["params"]["num_rounds"]:
         room["status"] = "finished"
     else:
-        # Reset shares to initial and re-draw g for this round
-        for pid, share in room["initial_shares"].items():
-            room["players"][pid]["share"] = share
         room["g_realized"] = _draw_g(room["params"])
         room["status"] = "playing"
 
