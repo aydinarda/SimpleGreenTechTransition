@@ -291,10 +291,12 @@ async def resolve_round(room_id: str, req: AdminRequest):
     if req.admin_token != room["admin_token"]: raise HTTPException(403, "Not admin")
     if room["status"] != "playing": raise HTTPException(400, "Not in playing phase")
 
+    prev = dict(room["submissions"])
     for pid in room["players"]:
-        room["submissions"].setdefault(pid, 0.0)
+        room["submissions"].setdefault(pid, room.get("last_submissions", {}).get(pid, 0.0))
 
     results, A_g = compute_round(room)
+    room["last_submissions"] = prev
 
     for pid, r in results.items():
         room["players"][pid]["share"] = r["s_new"]

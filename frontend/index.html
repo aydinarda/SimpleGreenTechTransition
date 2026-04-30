@@ -373,6 +373,8 @@ const S = {
 // ── Helpers ────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const f3 = n => (typeof n === 'number') ? n.toFixed(3) : '—';
+// Market size = 5000 units; raw shares (0–1) are scaled for display only, backend stays fractional
+const fs = n => (typeof n === 'number') ? Math.round(n * 5000) : '—';
 const f4 = n => (typeof n === 'number') ? n.toFixed(4) : '—';
 const fr = n => (typeof n === 'number') ? n.toFixed(3) : '—';
 
@@ -548,7 +550,7 @@ async function nextRound() {
 
 // ── Player: investment slider ──────────────────────────────────────────────
 function onSlider(v) {
-  $('inv-val').textContent = f3(parseFloat(v));
+  $('inv-val').textContent = fs(parseFloat(v));
 }
 
 async function submitInv() {
@@ -621,7 +623,7 @@ function handleAdmin(d) {
       `<li class="pi">
         <span class="pi-name">${p.name}</span>
         <div class="sbar"><div class="sbar-f" style="width:${(p.share*100).toFixed(1)}%"></div></div>
-        <span class="pi-share">${f3(p.share)}</span>
+        <span class="pi-share">${fs(p.share)}</span>
         <span class="badge ${p.submitted ? 'b-g' : 'b-o'}">${p.submitted ? '✓ Ready' : 'Pending'}</span>
       </li>`
     ).join('');
@@ -691,18 +693,18 @@ function handlePlayer(d) {
     $('player-game-title').textContent = `Round ${d.current_round}`;
 
     // My stats
-    $('share-disp').textContent = f3(S.myShare);
-    $('max-lbl').textContent = f3(S.myShare);
+    $('share-disp').textContent = fs(S.myShare);
+    $('max-lbl').textContent = fs(S.myShare);
     $('gmin-disp').textContent = f3(S.g_min);
     $('gmax-disp').textContent = f3(S.g_max);
-    $('thresh-min').textContent = f3(S.g_min * S.myShare);
-    $('thresh-max').textContent = f3(S.g_max * S.myShare);
+    $('thresh-min').textContent = fs(S.g_min * S.myShare);
+    $('thresh-max').textContent = fs(S.g_max * S.myShare);
     const slider = $('inv-slider');
     slider.max = S.myShare; slider.step = Math.max(0.0001, S.myShare / 1000);
 
     $('my-stats').innerHTML = `
-      <div class="sc"><div class="sv">${f3(S.myShare)}</div><div class="sl">Market Share (s)</div></div>
-      <div class="sc"><div class="sv">${f3(S.g_min * S.myShare)}–${f3(S.g_max * S.myShare)}</div><div class="sl">Threshold range (g·s)</div></div>
+      <div class="sc"><div class="sv">${fs(S.myShare)}</div><div class="sl">Market Share (s)</div></div>
+      <div class="sc"><div class="sv">${fs(S.g_min * S.myShare)}–${fs(S.g_max * S.myShare)}</div><div class="sl">Threshold range (g·s)</div></div>
       <div class="sc"><div class="sv">U(${f3(S.g_min)},${f3(S.g_max)})</div><div class="sl">Green demand g</div></div>
       <div class="sc"><div class="sv">${fr(me?.total_score ?? 0)}</div><div class="sl">Cumulative score</div></div>
     `;
@@ -717,7 +719,7 @@ function handlePlayer(d) {
       `<li class="pi ${pid === S.playerId ? 'me' : ''}">
         <span class="pi-name">${p.name}${pid === S.playerId ? ' <span class="badge b-me">you</span>' : ''}</span>
         <div class="sbar"><div class="sbar-f" style="width:${(p.share*100).toFixed(1)}%"></div></div>
-        <span class="pi-share">${f3(p.share)}</span>
+        <span class="pi-share">${fs(p.share)}</span>
         <span class="badge ${p.submitted ? 'b-g' : 'b-gray'}">${p.submitted ? '✓' : '…'}</span>
       </li>`
     ).join('');
@@ -793,7 +795,7 @@ function renderResults(d, hist) {
   const A_g = hist.A_g ?? 0;
   const gStr = d.g_realized != null ? `realized green demand = ${f3(d.g_realized)}` : `green demand distribution ~ U(${f3(d.g_min)}, ${f3(d.g_max)})`;
   $('res-meta').innerHTML =
-    `${gStr} &nbsp;|&nbsp; Total Green Served = ${f3(A_g)} &nbsp;|&nbsp; ` 
+    `${gStr} &nbsp;|&nbsp; Total Green Served = ${fs(A_g)} &nbsp;|&nbsp; ` 
     + `<br> reward<sub>green customer</sub> = ${p.pi_p ?? 4}, reward<sub>residual green customer</sub> = ${p.pi_r ?? 3}, reward<sub>stolen green customer</sub> = ${p.pi_q ?? 5}, `
     + `<br> underinvestment penalty = ${p.c_u ?? 10}, overinvestment penalty = ${p.c_o ?? 1}`;
 
@@ -804,10 +806,10 @@ function renderResults(d, hist) {
     const isMe = pid === S.playerId;
     const pos = r.pos_i;
     const posCls = pos > 1e-6 ? 'b-g' : pos < -1e-6 ? 'b-r' : 'b-gray';
-    const posStr = pos > 1e-6 ? '+'+f3(pos)+' ↑' : pos < -1e-6 ? f3(pos)+' ↓' : '0 =';
+    const posStr = pos > 1e-6 ? '+'+fs(pos)+' ↑' : pos < -1e-6 ? fs(pos)+' ↓' : '0 =';
     let uw = '—';
-    if (r.lost   > 1e-6) uw = `<span style="color:var(--red)">u=−${f3(r.lost)}</span>`;
-    if (r.gained > 1e-6) uw = `<span style="color:var(--g)">w=+${f3(r.gained)}</span>`;
+    if (r.lost   > 1e-6) uw = `<span style="color:var(--red)">u=−${fs(r.lost)}</span>`;
+    if (r.gained > 1e-6) uw = `<span style="color:var(--g)">w=+${fs(r.gained)}</span>`;
     const sc = r.score_normalized ?? 0;
     const scoreColor = sc >= 0 ? 'var(--g)' : 'var(--red)';
     const pen = r.penalty ?? 0;
@@ -815,12 +817,12 @@ function renderResults(d, hist) {
     const stealColor = (r.reward_steal ?? 0) > 0 ? 'var(--g)' : 'var(--muted)';
     return `<tr class="${isMe ? 'me' : ''}">
       <td><strong>${r.name}</strong>${isMe ? ' <span class="badge b-me">you</span>' : ''}</td>
-      <td>${f3(r.s_i)}</td>
-      <td>${f3(r.a_i)}</td>
-      <td>${f3(r.gs_i)}</td>
+      <td>${fs(r.s_i)}</td>
+      <td>${fs(r.a_i)}</td>
+      <td>${fs(r.gs_i)}</td>
       <td><span class="badge ${posCls}">${posStr}</span></td>
       <td>${uw}</td>
-      <td><strong>${f3(r.s_new)}</strong></td>
+      <td><strong>${fs(r.s_new)}</strong></td>
       <td>${f3(r.reward_own)}</td>
       <td>${f3(r.reward_2nd)}</td>
       <td style="color:${stealColor}">${f3(r.reward_steal ?? 0)}</td>
