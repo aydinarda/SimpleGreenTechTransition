@@ -266,7 +266,7 @@ tr.me td{background:#e8f5e9;font-weight:600}
 
   <div id="invest-form">
     <h3>Your Investment Decision</h3>
-    <p class="thresh-info">Choose <em>a<sub>i</sub></em> ∈ [0, s<sub>i</sub>]. Your share: <strong id="share-disp">0.000</strong> &nbsp;|&nbsp; g ~ U(<span id="gmin-disp">?</span>, <span id="gmax-disp">?</span>)</p>
+    <p class="thresh-info">Choose your market share (<em>a<sub>i</sub></em>) ∈ [0, up to your own share (<em>s<sub>i</sub></em>)]. Your share: <strong id="share-disp">0.000</strong> &nbsp; <br>|&nbsp; Distribution for green demand share ~ U(<span id="gmin-disp">?</span>, <span id="gmax-disp">?</span>)</p>
     <div class="inv-ctrl">
       <span style="font-size:.8rem;color:var(--muted)">0</span>
       <input type="range" id="inv-slider" min="0" max="1" step="0.001" value="0" oninput="onSlider(this.value)">
@@ -344,7 +344,7 @@ tr.me td{background:#e8f5e9;font-weight:600}
   <div class="podium" id="podium"></div>
   <div class="tscroll">
     <table>
-      <thead><tr><th>Rank</th><th>Player</th><th>Final Share</th><th>Cumulative Score</th></tr></thead>
+      <thead><tr><th>Rank</th><th>Player</th><th>Cumulative Score</th></tr></thead>
       <tbody id="final-tbody"></tbody>
     </table>
   </div>
@@ -821,7 +821,6 @@ function renderFinal(d) {
     `<tr class="${pid === S.playerId ? 'me' : ''}">
       <td>${medals[i] || i+1}</td>
       <td><strong>${p.name}</strong>${pid === S.playerId ? ' <span class="badge b-me">you</span>':''}</td>
-      <td>${f3(p.share)}</td>
       <td><strong>${fr(p.total_score)}</strong></td>
     </tr>`
   ).join('');
