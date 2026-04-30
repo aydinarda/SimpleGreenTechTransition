@@ -313,6 +313,8 @@ tr.me td{background:#e8f5e9;font-weight:600}
       <tbody id="res-tbody"></tbody>
     </table>
   </div>
+  <h3 style="margin-top:1.2rem">Cumulative Leaderboard</h3>
+  <ul class="plist" id="res-lb"></ul>
   <div id="res-admin-btns" class="h">
     <details id="rp-details" style="width:100%;margin-bottom:.8rem">
       <summary style="cursor:pointer;color:var(--muted);font-size:.88rem;padding:.4rem 0">⚙ Adjust parameters for next round</summary>
@@ -790,6 +792,15 @@ function renderResults(d, hist) {
       <td><strong style="color:${scoreColor}">${f3(sc)}</strong></td>
     </tr>`;
   }).join('');
+
+  const medals = ['🥇','🥈','🥉'];
+  const lb = Object.entries(d.players).sort((a,b) => b[1].total_score - a[1].total_score);
+  $('res-lb').innerHTML = lb.map(([pid, p], i) =>
+    `<li class="pi ${pid === S.playerId ? 'me' : ''}">
+      <span class="pi-name">${medals[i] || i+1} ${p.name}${pid === S.playerId ? ' <span class="badge b-me">you</span>' : ''}</span>
+      <span class="pi-share"><strong>${fr(p.total_score)}</strong></span>
+    </li>`
+  ).join('');
 }
 
 // ── Final results ──────────────────────────────────────────────────────────
