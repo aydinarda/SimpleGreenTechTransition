@@ -793,9 +793,7 @@ function renderResults(d, hist) {
 
   const p = d.params || {};
   const A_g = hist.A_g ?? 0;
-  const gStr = d.g_realized != null ? `realized green demand = ${f3(d.g_realized)}` : `green demand distribution ~ U(${f3(d.g_min)}, ${f3(d.g_max)})`;
-  $('res-meta').innerHTML =
-    `${gStr} &nbsp;|&nbsp; Total Green Served = ${fs(A_g)} &nbsp;|&nbsp; ` 
+  const gStr = d.g_realized != null ? `realized green demand = ${f3(d.g_realized)}` : `green demand distribution ~ U(${f3(d.g_min)}, ${f3(d.g_max)})`; 
     + `<br> reward<sub>green customer</sub> = ${p.pi_p ?? 4}, reward<sub>residual green customer</sub> = ${p.pi_r ?? 3}, reward<sub>stolen green customer</sub> = ${p.pi_q ?? 5}, `
     + `<br> underinvestment penalty = ${p.c_u ?? 10}, overinvestment penalty = ${p.c_o ?? 1}`;
 
