@@ -39,8 +39,8 @@ class CreateRoomRequest(BaseModel):
     pi_q: float = 5.0           # reward per stolen green customer
     c_u: float = 10.0           # penalty per customer lost (underinvestors)
     c_o: float = 1.0            # penalty per unit of failed stealing (overinvestors)
-    major_share: float = 0.8    # fraction of total market held by major players
-    major_player_frac: float = 0.2  # fraction of players designated as major
+    major_share: float = 1.0    # fraction of total market held by major players
+    major_player_frac: float = 1.0  # fraction of players designated as major
 
 class JoinRequest(BaseModel):
     player_name: str
