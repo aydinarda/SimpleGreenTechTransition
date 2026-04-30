@@ -698,7 +698,7 @@ function handlePlayer(d) {
     $('thresh-min').textContent = f3(S.g_min * S.myShare);
     $('thresh-max').textContent = f3(S.g_max * S.myShare);
     const slider = $('inv-slider');
-    slider.max = S.myShare; slider.step = Math.max(0.001, S.myShare / 1000);
+    slider.max = S.myShare; slider.step = Math.max(0.0001, S.myShare / 1000);
 
     $('my-stats').innerHTML = `
       <div class="sc"><div class="sv">${f3(S.myShare)}</div><div class="sl">Market Share (s)</div></div>
