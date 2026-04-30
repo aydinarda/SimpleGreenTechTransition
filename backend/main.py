@@ -31,7 +31,7 @@ app.add_middleware(
 class CreateRoomRequest(BaseModel):
     g_min: float
     g_max: float
-    num_rounds: int = 6
+    num_rounds: int = 3
     alpha: float = 0.0          # underinvestor weight: 0=market share, 1=effort (log shortage)
     beta: float = 0.0           # overinvestor weight:  0=market share, 1=effort (log excess)
     pi_p: float = 4.0           # reward per green customer served (own allocation)
