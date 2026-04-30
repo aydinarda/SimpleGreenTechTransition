@@ -303,11 +303,11 @@ tr.me td{background:#e8f5e9;font-weight:600}
           <th>Position</th>
           <th>Lost / Gained</th>
           <th>New Share</th>
+          <th>Score</th>
           <th>reward<sub>green customer</sub>·own</th>
           <th>reward<sub>residual green customer</sub>·2nd</th>
           <th>reward<sub>stolen green customer</sub>·w</th>
           <th>Penalty</th>
-          <th>Score</th>
         </tr>
       </thead>
       <tbody id="res-tbody"></tbody>
@@ -821,11 +821,11 @@ function renderResults(d, hist) {
       <td><span class="badge ${posCls}">${posStr}</span></td>
       <td>${uw}</td>
       <td><strong>${fs(r.s_new)}</strong></td>
+      <td><strong style="color:${scoreColor}">${f3(sc)}</strong></td>
       <td>${f3(r.reward_own)}</td>
       <td>${f3(r.reward_2nd)}</td>
       <td style="color:${stealColor}">${f3(r.reward_steal ?? 0)}</td>
       <td style="color:${penColor}">${f3(pen)}</td>
-      <td><strong style="color:${scoreColor}">${f3(sc)}</strong></td>
     </tr>`;
   }).join('');
 
