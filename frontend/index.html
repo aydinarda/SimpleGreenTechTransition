@@ -276,6 +276,7 @@ tr.me td{background:#e8f5e9;font-weight:600}
     <p class="thresh-info">
       Green threshold range: <strong>[<span id="thresh-min">0.000</span>, <span id="thresh-max">0.000</span>]</strong>
     </p>
+    <div class="alert a-info" id="game-params" style="margin-top:.8rem"></div>
     <button class="btn btn-p btn-w" id="submit-btn" onclick="submitInv()">Submit Investment</button>
   </div>
 
@@ -708,6 +709,11 @@ function handlePlayer(d) {
       <div class="sc"><div class="sv">U(${f3(S.g_min)},${f3(S.g_max)})</div><div class="sl">Green demand g</div></div>
       <div class="sc"><div class="sv">${fr(me?.total_score ?? 0)}</div><div class="sl">Cumulative score</div></div>
     `;
+
+    const p = d.params || {};
+    $('game-params').innerHTML =
+      `reward<sub>green customer</sub> = ${p.pi_p ?? 4}, reward<sub>residual green customer</sub> = ${p.pi_r ?? 3}, reward<sub>stolen green customer</sub> = ${p.pi_q ?? 5}, `
+      + `<br>underinvestment penalty = ${p.c_u ?? 10}, overinvestment penalty = ${p.c_o ?? 1}`;
 
     // Show submitted state
     if (me?.submitted) {
