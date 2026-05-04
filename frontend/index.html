@@ -568,7 +568,7 @@ async function submitInv() {
 function startPoll() {
   if (S.pollId) clearInterval(S.pollId);
   poll();
-  S.pollId = setInterval(poll, 2000);
+  S.pollId = setInterval(poll, 3000);
 }
 
 async function poll() {

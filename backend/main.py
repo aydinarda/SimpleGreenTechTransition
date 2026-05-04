@@ -188,7 +188,8 @@ def compute_round(room: dict) -> tuple:
         r["reward_steal"] = pi_q * r["gained"]
         r["penalty"]      = -c_u * r["lost"] - c_o * r["overage"]
         r["score"]            = r["reward_own"] + r["reward_2nd"] + r["reward_steal"] + r["penalty"]
-        r["score_normalized"] = r["score"] / r["s_i"] if r["s_i"] > 1e-12 else 0.0
+        initial = room["initial_shares"].get(pid, r["s_i"])
+        r["score_normalized"] = r["score"] / initial if initial > 1e-12 else 0.0
 
     return results, A_g
 
@@ -368,7 +369,7 @@ def get_state(room_id: str, player_id: Optional[str] = None, admin_token: Option
         "g_realized": room["g_realized"] if is_admin else None,
         "params": room["params"],
         "players": players_info,
-        "history": room["history"],
+        "history": room["history"][-1:],
         "my_share": room["players"].get(player_id, {}).get("share") if player_id else None,
         "my_submitted": player_id in room["submissions"] if player_id else False,
     }
