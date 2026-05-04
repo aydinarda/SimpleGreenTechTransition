@@ -245,11 +245,12 @@ export function setup() {
   const sjr = j(post('/api/rooms', BASE_PARAMS));
   if (!sjr.room_id) throw new Error('setup: could not create spike-join-room');
 
-  // Room for poll_storm: 5 players joined and game started — stays in "playing"
+  // Room for poll_storm: 40 players joined and game started — stays in "playing"
   // for the full 120 s of the scenario because nobody resolves it.
+  // 40 players makes /state responses large (~8 KB) so the spike is visible in Render metrics.
   const psr = j(post('/api/rooms', { ...BASE_PARAMS, num_rounds: 3 }));
   if (!psr.room_id) throw new Error('setup: could not create poll-storm-room');
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 40; i++) {
     post(`/api/rooms/${psr.room_id}/join`, { player_name: `Poll${i + 1}` });
   }
   post(`/api/rooms/${psr.room_id}/start`, { admin_token: psr.admin_token });
